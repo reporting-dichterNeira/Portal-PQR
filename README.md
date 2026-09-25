@@ -1,6 +1,29 @@
 ﻿# Portal de Solicitudes PQR (Comercial, Validador y Administrador)
 
+## Piloto desplegable en GitHub Pages
+
+La carpeta [`docs/`](docs/) contiene la versión estática para pruebas, compatible con GitHub Pages. Conserva el flujo de PQR completo en el navegador y almacena los datos de prueba en `localStorage`; por ello no requiere Python, servidor, base de datos ni credenciales de producción.
+
+Tras habilitar GitHub Pages con **GitHub Actions**, el sitio estará en:
+
+`https://reporting-dichterneira.github.io/Portal-PQR/`
+
+> Este enlace será el frontend permanente. En la siguiente fase se conectará Supabase desde ese mismo sitio; consulta [`supabase/README.md`](supabase/README.md). No ingreses datos reales ni sensibles durante el piloto.
+
+---
+
 Plataforma corporativa integral para la radicación, dictamen, control de calidad y análisis de SLA de PQRs desarrollada con **FastAPI**, **SQLite**, **Tailwind CSS** y **openpyxl**.
+
+## Flujo operativo
+
+`Radicado → En validación → Pendiente de redigitación → Pendiente de verificación → Cerrado`
+
+- El comercial radica y consulta únicamente sus propios casos.
+- El validador se asigna el caso, emite el dictamen y, cuando aplica, lo envía a redigitación.
+- El redigitador registra un número de auditoría único; el caso vuelve al validador para verificación final.
+- El validador aprueba el cierre o devuelve la redigitación con observaciones. Cada paso queda en la línea de tiempo y genera una alerta interna.
+
+La plataforma controla el acceso por rol (administrador, validador, redigitador y comercial), valida adjuntos permitidos de hasta 10 MB, previene duplicados recientes y expone indicadores de SLA por etapa y una cola de escalaciones.
 
 ---
 

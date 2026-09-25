@@ -133,6 +133,19 @@
             </div>
         </div>
 
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <h3 class="font-bold text-slate-900 text-sm">SLA por etapa</h3>
+                <p class="text-[11px] text-slate-500 mt-1">Permite identificar en qué punto del flujo se acumula el tiempo.</p>
+                <div id="stage-sla-container" class="mt-4 space-y-3"></div>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <h3 class="font-bold text-slate-900 text-sm">Casos para escalar</h3>
+                <p class="text-[11px] text-slate-500 mt-1">Casos abiertos que superan la meta de su etapa actual.</p>
+                <div id="escalations-container" class="mt-4 space-y-2 max-h-56 overflow-y-auto"></div>
+            </div>
+        </div>
+
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
                 <h2 class="text-base font-bold text-slate-800">Solicitudes para Gestión y Dictamen</h2>
@@ -470,15 +483,19 @@
 
     async function loadData() {
         try {
-            const [pqrRes, metricsRes, tipRes] = await Promise.all([
+            const [pqrRes, metricsRes, tipRes, stageRes, escalationRes] = await Promise.all([
                 fetch('/api/pqr'),
                 fetch('/api/metrics'),
-                fetch('/api/tipologias')
+                fetch('/api/tipologias'),
+                fetch('/api/gestion/sla-etapas'),
+                fetch('/api/gestion/escalaciones')
             ]);
 
             allPqrs = await pqrRes.json();
             const metrics = await metricsRes.json();
             tipologiasList = await tipRes.json();
+            const stageSla = await stageRes.json();
+            const escalations = await escalationRes.json();
 
             document.getElementById('kpi-total').innerText = metrics.total;
             document.getElementById('kpi-pendientes').innerText = metrics.pendientes;
@@ -488,6 +505,8 @@
 
             updateTypologiesSelect();
             renderValidadorTable(allPqrs);
+            renderStageSla(stageSla.etapas || []);
+            renderEscalations(escalations || []);
         } catch (err) {
             console.error(err);
             showToast('Error cargando información', 'error');
@@ -496,8 +515,12 @@
 
     async function loadStatsData() {
         try {
-            const res = await fetch('/api/validador/stats');
+            const [res, stageRes, escalationRes] = await Promise.all([
+                fetch('/api/validador/stats'), fetch('/api/gestion/sla-etapas'), fetch('/api/gestion/escalaciones')
+            ]);
             validatorStatsData = await res.json();
+            const stageSla = await stageRes.json();
+            const escalations = await escalationRes.json();
 
             document.getElementById('stats-global-avg').innerText = `${validatorStatsData.global_avg_hours} h`;
             document.getElementById('stats-global-sla').innerText = `${validatorStatsData.global_sla_pct}%`;
@@ -511,6 +534,8 @@
             renderAdjudicablesStats(validatorStatsData.adjudicable_stats);
             renderTipologiasStats(validatorStatsData.tipologias_stats);
             renderPaisesStats(validatorStatsData.pais_stats);
+            renderStageSla(stageSla.etapas || []);
+            renderEscalations(escalations || []);
 
         } catch (err) {
             console.error(err);
@@ -656,9 +681,10 @@
 
         tbody.innerHTML = list.map(p => {
             let estBadge = '';
-            if (p.estado === 'Pendiente') estBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Pendiente</span>';
-            else if (p.estado === 'En Revisión') estBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-800">En Revisión</span>';
-            else if (p.estado === 'Resuelto') estBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Resuelto</span>';
+            if (['Radicado', 'Pendiente', 'Reabierto'].includes(p.estado)) estBadge = `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">${p.estado}</span>`;
+            else if (['En Revisión', 'En Validación'].includes(p.estado)) estBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-800">En validación</span>';
+            else if (['Resuelto', 'Cerrado', 'No Aplica'].includes(p.estado)) estBadge = `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">${p.estado}</span>`;
+            else if (p.estado === 'Pendiente de Verificación') estBadge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">Verificación final</span>';
             else estBadge = `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">${p.estado}</span>`;
 
             let aplBadge = '';
@@ -708,12 +734,15 @@
                     </td>
                     <td class="py-3 px-4 whitespace-nowrap">${adjudicableBadge}</td>
                     <td class="py-3 px-4 text-xs font-mono text-slate-500 whitespace-nowrap">${p.fecha_resolucion ? p.fecha_resolucion.split(' ')[0] : '-'}</td>
-                    <td class="py-3 px-4 text-center whitespace-nowrap">
+                    <td class="py-3 px-4 text-center whitespace-nowrap space-y-1">
+                        ${!p.asignado_validador_email ? `<button onclick="assignToMe(${p.id})" class="block w-full px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold">Asignarme</button>` : ''}
+                        ${p.estado === 'Pendiente de Verificación' ? `<button onclick="verifyRedigitacion(${p.id}, true)" class="block w-full px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-[10px] font-bold">Verificar</button>` : ''}
+                        ${['Cerrado', 'Resuelto', 'No Aplica'].includes(p.estado) ? `<button onclick="reopenPqr(${p.id})" class="block w-full px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[10px] font-bold">Reabrir</button>` : ''}
                         <button onclick="openResolveModal(${p.id})" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all flex items-center gap-1 mx-auto">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
                             </svg>
-                            <span>${p.estado === 'Pendiente' ? 'Dictaminar' : 'Editar'}</span>
+                            <span>${['Radicado', 'Pendiente', 'En Validación', 'Reabierto'].includes(p.estado) ? 'Dictaminar' : 'Ver'}</span>
                         </button>
                     </td>
                 </tr>
@@ -759,6 +788,43 @@
         });
 
         renderValidadorTable(filtered);
+    }
+
+    function renderStageSla(stages) {
+        const container = document.getElementById('stage-sla-container');
+        container.innerHTML = stages.map(stage => `<div class="flex items-center justify-between rounded-xl border border-slate-200 p-3 text-xs"><div><strong class="text-slate-800">${stage.nombre}</strong><span class="block text-slate-400">${stage.casos_medidos} casos · meta ≤ ${stage.meta_horas} h</span></div><span class="font-black ${stage.cumple_meta ? 'text-emerald-700' : 'text-rose-700'}">${stage.promedio_horas} h</span></div>`).join('') || '<p class="text-xs text-slate-400">Aún no hay tiempos para medir.</p>';
+    }
+
+    function renderEscalations(items) {
+        const container = document.getElementById('escalations-container');
+        container.innerHTML = items.length ? items.map(item => `<div class="rounded-xl bg-rose-50 border border-rose-100 p-3 text-xs"><strong class="text-rose-800">${item.consecutivo}</strong><span class="block text-rose-700">${item.etapa}: ${item.horas} h / meta ${item.meta_horas} h</span></div>`).join('') : '<p class="text-xs text-emerald-700 bg-emerald-50 rounded-xl p-3">No hay casos vencidos por escalar.</p>';
+    }
+
+    async function assignToMe(pqrId) {
+        const user = JSON.parse(localStorage.getItem('pqr_user') || '{}');
+        if (!user.email) return showToast('Tu sesión no está disponible. Ingresa nuevamente.', 'error');
+        const res = await fetch(`/api/pqr/${pqrId}/asignar/validador`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({assignee_email:user.email}) });
+        if (!res.ok) return showToast((await res.json()).detail || 'No se pudo asignar.', 'error');
+        showToast('Caso asignado a tu bandeja.', 'success');
+        loadData();
+    }
+
+    async function verifyRedigitacion(pqrId, aprobado) {
+        const comentario = window.prompt(aprobado ? 'Comentario de verificación y cierre:' : 'Motivo de devolución a redigitación:');
+        if (!comentario || comentario.trim().length < 3) return;
+        const res = await fetch(`/api/pqr/${pqrId}/verificar-redigitacion`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({aprobado, comentario}) });
+        if (!res.ok) return showToast((await res.json()).detail || 'No se pudo verificar.', 'error');
+        showToast(aprobado ? 'Redigitación verificada y caso cerrado.' : 'Caso devuelto a redigitación.', 'success');
+        loadData();
+    }
+
+    async function reopenPqr(pqrId) {
+        const motivo = window.prompt('Motivo de reapertura:');
+        if (!motivo || motivo.trim().length < 3) return;
+        const res = await fetch(`/api/pqr/${pqrId}/reabrir`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({motivo}) });
+        if (!res.ok) return showToast((await res.json()).detail || 'No se pudo reabrir.', 'error');
+        showToast('PQR reabierta y enviada a validación.', 'success');
+        loadData();
     }
 
     function openResolveModal(id) {

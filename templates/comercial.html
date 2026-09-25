@@ -261,6 +261,13 @@
                 <div id="resolution-content"></div>
             </div>
 
+            <div class="border-t border-slate-200 pt-4">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Trazabilidad del caso</h4>
+                <div id="detail-timeline" class="space-y-2 text-xs text-slate-600">Cargando historial…</div>
+            </div>
+
+            <div id="detail-feedback"></div>
+
             <div class="pt-4 border-t border-slate-200 flex justify-end">
                 <button onclick="closeDetailModal()" class="px-5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-900 text-white rounded-lg">
                     Cerrar
@@ -281,7 +288,7 @@
 
     async function loadRequests() {
         try {
-            const res = await fetch(`/api/pqr/mis-solicitudes?email=${encodeURIComponent(currentEmail)}`);
+            const res = await fetch('/api/pqr/mis-solicitudes');
             myPqrs = await res.json();
             renderTable(myPqrs);
         } catch (err) {
@@ -424,7 +431,6 @@
         btn.innerText = 'Subiendo y Radicando...';
 
         const formData = new FormData();
-        formData.append('comercial_email', currentEmail);
         formData.append('id_pdv', document.getElementById('pqr-id-pdv').value);
         formData.append('cliente', clienteFinal);
         formData.append('pais', document.getElementById('pqr-pais').value);
@@ -486,6 +492,15 @@
             adjSection.innerHTML = '<span class="text-xs text-slate-400 italic">Sin archivo adjunto</span>';
         }
 
+        const feedback = document.getElementById('detail-feedback');
+        if (p.estado === 'Cerrado' && p.satisfactorio === null) {
+            feedback.innerHTML = `<div class="border-t border-slate-200 pt-4"><p class="text-xs font-bold text-slate-700 mb-2">¿La solución fue satisfactoria?</p><div class="flex gap-2"><button onclick="sendFeedback(${p.id}, true)" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold">Sí, cerrar</button><button onclick="sendFeedback(${p.id}, false)" class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold">No, necesito seguimiento</button></div></div>`;
+        } else if (p.satisfactorio !== null && p.satisfactorio !== undefined) {
+            feedback.innerHTML = `<div class="border-t border-slate-200 pt-4 text-xs ${p.satisfactorio ? 'text-emerald-700' : 'text-rose-700'}">Retroalimentación registrada: ${p.satisfactorio ? 'solución satisfactoria' : 'requiere seguimiento'}.</div>`;
+        } else feedback.innerHTML = '';
+
+        loadTimeline(p.id);
+
         // Resolución
         const resDiv = document.getElementById('resolution-content');
         if (p.estado === 'Pendiente') {
@@ -531,6 +546,26 @@
     }
     function closeDetailModal() {
         document.getElementById('detail-modal').classList.add('hidden');
+    }
+
+    async function loadTimeline(pqrId) {
+        const el = document.getElementById('detail-timeline');
+        try {
+            const res = await fetch(`/api/pqr/${pqrId}/timeline`);
+            if (!res.ok) throw new Error();
+            const items = await res.json();
+            el.innerHTML = items.length ? items.map(item => `<div class="flex gap-2"><span class="font-mono text-slate-400 whitespace-nowrap">${item.fecha}</span><span><strong class="text-slate-700">${item.accion}</strong>${item.detalle ? ` · ${item.detalle}` : ''}</span></div>`).join('') : '<span class="text-slate-400">Sin movimientos registrados.</span>';
+        } catch (e) { el.innerHTML = '<span class="text-rose-600">No fue posible cargar el historial.</span>'; }
+    }
+
+    async function sendFeedback(pqrId, satisfactorio) {
+        const comentario = satisfactorio ? '' : (window.prompt('Cuéntanos qué falta para resolver el caso:') || '');
+        if (!satisfactorio && comentario.trim().length < 3) return;
+        const res = await fetch(`/api/pqr/${pqrId}/retroalimentacion`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({satisfactorio, comentario})});
+        if (!res.ok) return showToast('No se pudo guardar la retroalimentación.', 'error');
+        showToast('Gracias, registramos tu retroalimentación.', 'success');
+        await loadRequests();
+        viewDetail(pqrId);
     }
 
     window.addEventListener('DOMContentLoaded', loadRequests);

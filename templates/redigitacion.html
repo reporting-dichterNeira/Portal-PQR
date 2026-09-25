@@ -294,6 +294,10 @@
                 stBadge = '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>Pendiente</span>';
             } else if (p.estado_redigitacion === 'Redigitado') {
                 stBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">✓ Redigitado</span>';
+            } else if (p.estado_redigitacion === 'Devuelto') {
+                stBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">Devuelto</span>';
+            } else if (p.estado_redigitacion === 'Verificado') {
+                stBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">Verificado</span>';
             } else {
                 stBadge = `<span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">${p.estado_redigitacion || 'No aplica'}</span>`;
             }
@@ -309,8 +313,8 @@
                 adjBadge = `<a href="${p.adjunto_ruta}" target="_blank" class="px-2 py-0.5 text-[11px] font-semibold ${isImg ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'} rounded border">${isImg ? '🖼️ Ver' : '📊 Excel'}</a>`;
             }
 
-            const btnActionText = p.estado_redigitacion === 'Pendiente' ? 'Redigitar' : 'Editar Auditoría';
-            const btnColor = p.estado_redigitacion === 'Pendiente' 
+            const btnActionText = ['Pendiente', 'Devuelto'].includes(p.estado_redigitacion) ? 'Redigitar' : 'Ver Auditoría';
+            const btnColor = ['Pendiente', 'Devuelto'].includes(p.estado_redigitacion)
                 ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20' 
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300';
 
@@ -388,20 +392,13 @@
         btn.disabled = true;
         btn.innerHTML = 'Guardando...';
 
-        const userStr = localStorage.getItem('pqr_user');
-        let userEmail = 'redigitador@empresa.com';
-        if (userStr) {
-            try { userEmail = JSON.parse(userStr).email; } catch(err){}
-        }
-
         try {
             const res = await fetch(`/api/pqr/${pqrId}/redigitar`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     nuevo_numero_auditoria: nuevoNum,
-                    notas: notas,
-                    redigitador_email: userEmail
+                    notas: notas
                 })
             });
 

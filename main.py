@@ -13,13 +13,14 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from database import (
     init_db, create_pqr, get_pqrs, get_pqr_by_id, 
     resolve_pqr, get_tipologias, get_tipologias_detail, add_tipologia, delete_tipologia,
-    get_metrics, authenticate_user, create_user, get_all_users, get_user_by_id,
+    get_metrics, authenticate_user, create_user, get_all_users, get_user_by_id, get_user_by_email, get_active_users_by_role,
     update_user, delete_user, get_validator_stats, redigitar_pqr, get_pqrs_redigitacion,
-    calculate_sla_business_hours
+    calculate_sla_business_hours, find_possible_duplicate, assign_pqr, verify_redigitacion,
+    reopen_pqr, add_feedback, get_timeline, get_notifications, mark_notifications_read, get_stage_sla_metrics, get_escalations
 )
-from models import UserLogin, UserCreate, UserUpdate, PQRResolve, TipologiaCreate, PQRRedigitar
+from models import UserLogin, UserCreate, UserUpdate, PQRResolve, TipologiaCreate, PQRRedigitar, PQRAssignment, PQRVerification, PQRReopen, PQRFeedback
 
-app = FastAPI(title="Portal de Gestión PQR", version="2.2.0")
+app = FastAPI(title="Portal de Gestión PQR", version="3.0.0")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -34,6 +35,27 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 def on_startup():
     init_db()
 
+def get_current_user(request: Request):
+    email = request.cookies.get("session_user")
+    user = get_user_by_email(email) if email else None
+    if not user or not user.get("activo"):
+        raise HTTPException(status_code=401, detail="Debes iniciar sesión para continuar")
+    return user
+
+def require_roles(*roles):
+    def dependency(user=Depends(get_current_user)):
+        if user["rol"] not in roles:
+            raise HTTPException(status_code=403, detail="No tienes permiso para esta acción")
+        return user
+    return dependency
+
+def require_page_user(request: Request, roles):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return None
+    return user if user["rol"] in roles else None
+
 # --- Rutas de Vistas Web ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -41,21 +63,28 @@ def view_home(request: Request):
     return templates.TemplateResponse(request=request, name="login.html")
 
 @app.get("/comercial", response_class=HTMLResponse)
-def view_comercial(request: Request, email: Optional[str] = None):
-    if not email:
+def view_comercial(request: Request):
+    user = require_page_user(request, ("comercial",))
+    if not user:
         return RedirectResponse(url="/")
-    return templates.TemplateResponse(request=request, name="comercial.html", context={"email": email.strip()})
+    return templates.TemplateResponse(request=request, name="comercial.html", context={"email": user["email"]})
 
 @app.get("/validador", response_class=HTMLResponse)
 def view_validador(request: Request):
+    if not require_page_user(request, ("validador", "admin")):
+        return RedirectResponse(url="/")
     return templates.TemplateResponse(request=request, name="validador.html")
 
 @app.get("/redigitacion", response_class=HTMLResponse)
 def view_redigitacion(request: Request):
+    if not require_page_user(request, ("redigitador", "admin")):
+        return RedirectResponse(url="/")
     return templates.TemplateResponse(request=request, name="redigitacion.html")
 
 @app.get("/admin", response_class=HTMLResponse)
 def view_admin(request: Request):
+    if not require_page_user(request, ("admin",)):
+        return RedirectResponse(url="/")
     return templates.TemplateResponse(request=request, name="admin.html")
 
 # --- Autenticación ---
@@ -65,7 +94,7 @@ def api_login(data: UserLogin, response: Response):
     user = authenticate_user(data.email, data.password)
     if not user:
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
-    response.set_cookie(key="session_user", value=user["email"], httponly=True, max_age=86400)
+    response.set_cookie(key="session_user", value=user["email"], httponly=True, samesite="lax", max_age=86400)
     return user
 
 @app.post("/api/auth/logout")
@@ -76,11 +105,11 @@ def api_logout(response: Response):
 # --- Panel Administrativo (Gestión de Usuarios y Tipologías) ---
 
 @app.get("/api/admin/users")
-def api_get_users():
+def api_get_users(user=Depends(require_roles("admin"))):
     return get_all_users()
 
 @app.post("/api/admin/users")
-def api_create_user(user_data: UserCreate):
+def api_create_user(user_data: UserCreate, user=Depends(require_roles("admin"))):
     created = create_user(
         nombre=user_data.nombre,
         email=user_data.email,
@@ -92,7 +121,7 @@ def api_create_user(user_data: UserCreate):
     return created
 
 @app.put("/api/admin/users/{user_id}")
-def api_update_user(user_id: int, user_data: UserUpdate):
+def api_update_user(user_id: int, user_data: UserUpdate, user=Depends(require_roles("admin"))):
     updated = update_user(
         user_id=user_id,
         nombre=user_data.nombre,
@@ -106,7 +135,7 @@ def api_update_user(user_id: int, user_data: UserUpdate):
     return updated
 
 @app.delete("/api/admin/users/{user_id}")
-def api_delete_user(user_id: int):
+def api_delete_user(user_id: int, user=Depends(require_roles("admin"))):
     if user_id == 1:
         raise HTTPException(status_code=400, detail="No es posible eliminar el superadministrador principal.")
     ok = delete_user(user_id)
@@ -115,11 +144,11 @@ def api_delete_user(user_id: int):
     return {"status": "deleted"}
 
 @app.get("/api/admin/tipologias-detail")
-def api_get_tipologias_detail():
+def api_get_tipologias_detail(user=Depends(require_roles("admin"))):
     return get_tipologias_detail()
 
 @app.delete("/api/admin/tipologias/{tipologia_id}")
-def api_delete_tipologia(tipologia_id: int):
+def api_delete_tipologia(tipologia_id: int, user=Depends(require_roles("admin"))):
     ok = delete_tipologia(tipologia_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Tipología no encontrada")
@@ -132,7 +161,7 @@ def api_get_tipologias():
     return get_tipologias()
 
 @app.post("/api/tipologias")
-def api_add_tipologia(data: TipologiaCreate):
+def api_add_tipologia(data: TipologiaCreate, user=Depends(require_roles("admin"))):
     ok = add_tipologia(data.nombre)
     if not ok:
         raise HTTPException(status_code=400, detail="La tipología ya existe o no se pudo agregar.")
@@ -141,28 +170,39 @@ def api_add_tipologia(data: TipologiaCreate):
 # --- Estadísticas y Métricas de Rendimiento de Validadores (SLA) ---
 
 @app.get("/api/validador/stats")
-def api_get_validador_stats():
+def api_get_validador_stats(user=Depends(require_roles("validador", "admin"))):
     return get_validator_stats()
 
 # --- PQRs (Radicación Comercial con Archivos) ---
 
 @app.post("/api/pqr")
 async def api_create_pqr(
-    comercial_email: str = Form(...),
     id_pdv: str = Form(...),
     cliente: str = Form(...),
     pais: str = Form(...),
     error: str = Form(...),
-    archivo: Optional[UploadFile] = File(None)
+    archivo: Optional[UploadFile] = File(None),
+    user=Depends(require_roles("comercial"))
 ):
+    comercial_email = user["email"]
+    duplicate = find_possible_duplicate(comercial_email, id_pdv, error)
+    if duplicate:
+        raise HTTPException(status_code=409, detail=f"Posible duplicado: ya existe el radicado {duplicate['consecutivo']} para este PDV.")
     adjunto_nombre = None
     adjunto_ruta = None
 
     if archivo and archivo.filename:
+        allowed_extensions = {".png", ".jpg", ".jpeg", ".webp", ".xlsx", ".xls"}
+        extension = os.path.splitext(archivo.filename)[1].lower()
+        if extension not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="Adjunto no permitido. Usa PNG, JPG, WEBP, XLSX o XLS.")
+        content = await archivo.read(10 * 1024 * 1024 + 1)
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="El adjunto supera el límite de 10 MB.")
         safe_name = f"{uuid.uuid4().hex[:8]}_{os.path.basename(archivo.filename)}"
         file_path = os.path.join(UPLOADS_DIR, safe_name)
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(archivo.file, buffer)
+            buffer.write(content)
         adjunto_nombre = archivo.filename
         adjunto_ruta = f"/uploads/{safe_name}"
 
@@ -182,26 +222,33 @@ def api_get_pqrs(
     comercial_email: Optional[str] = None,
     estado: Optional[str] = None,
     aplica: Optional[str] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    user=Depends(require_roles("validador", "admin"))
 ):
     return get_pqrs(comercial_email=comercial_email, estado=estado, aplica=aplica, search=search)
 
 @app.get("/api/pqr/mis-solicitudes")
-def api_mis_solicitudes(email: str = Query(...)):
-    return get_pqrs(comercial_email=email)
+def api_mis_solicitudes(user=Depends(require_roles("comercial"))):
+    return get_pqrs(comercial_email=user["email"])
 
 @app.get("/api/pqr/{pqr_id}")
-def api_get_pqr(pqr_id: int):
+def api_get_pqr(pqr_id: int, user=Depends(get_current_user)):
     item = get_pqr_by_id(pqr_id)
     if not item:
         raise HTTPException(status_code=404, detail="PQR no encontrada")
+    if user["rol"] == "comercial" and item["comercial_email"].lower() != user["email"].lower():
+        raise HTTPException(status_code=403, detail="No puedes consultar una PQR de otro comercial")
+    if user["rol"] == "redigitador" and item.get("asignado_redigitador_email") != user["email"]:
+        raise HTTPException(status_code=403, detail="La PQR no está asignada a tu equipo")
     return item
 
 @app.post("/api/pqr/{pqr_id}/resolver")
-def api_resolve_pqr(pqr_id: int, resolve_data: PQRResolve):
+def api_resolve_pqr(pqr_id: int, resolve_data: PQRResolve, user=Depends(require_roles("validador", "admin"))):
     existing = get_pqr_by_id(pqr_id)
     if not existing:
         raise HTTPException(status_code=404, detail="PQR no encontrada")
+    if user["rol"] == "validador" and existing.get("asignado_validador_email") != user["email"]:
+        raise HTTPException(status_code=403, detail="La PQR debe estar asignada a tu usuario antes de dictaminarla")
     
     updated = resolve_pqr(
         pqr_id=pqr_id,
@@ -210,35 +257,111 @@ def api_resolve_pqr(pqr_id: int, resolve_data: PQRResolve):
         tipologia=resolve_data.tipologia,
         adjudicable=resolve_data.adjudicable,
         respuesta=resolve_data.respuesta,
-        validador_email=resolve_data.validador_email,
+        validador_email=user["email"],
         requiere_redigitacion=resolve_data.requiere_redigitacion or False
     )
     return updated
 
+# --- Asignación, trazabilidad y alertas ---
+
+@app.get("/api/users/{rol}")
+def api_get_users_by_role(rol: str, user=Depends(require_roles("admin", "validador"))):
+    if rol not in ("validador", "redigitador"):
+        raise HTTPException(status_code=400, detail="Rol no asignable")
+    return get_active_users_by_role(rol)
+
+@app.post("/api/pqr/{pqr_id}/asignar/{rol}")
+def api_assign_pqr(pqr_id: int, rol: str, data: PQRAssignment, user=Depends(require_roles("admin", "validador"))):
+    if rol not in ("validador", "redigitador"):
+        raise HTTPException(status_code=400, detail="Tipo de asignación inválido")
+    if rol == "redigitador" and user["rol"] not in ("admin", "validador"):
+        raise HTTPException(status_code=403, detail="No autorizado")
+    updated = assign_pqr(pqr_id, data.assignee_email, rol, user["email"])
+    if not updated:
+        raise HTTPException(status_code=400, detail="No se pudo asignar: revisa usuario, rol y estado activo")
+    return updated
+
+@app.get("/api/pqr/{pqr_id}/timeline")
+def api_get_timeline(pqr_id: int, user=Depends(get_current_user)):
+    item = get_pqr_by_id(pqr_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="PQR no encontrada")
+    if user["rol"] == "comercial" and item["comercial_email"].lower() != user["email"].lower():
+        raise HTTPException(status_code=403, detail="No autorizado")
+    return get_timeline(pqr_id)
+
+@app.get("/api/notificaciones")
+def api_notifications(user=Depends(get_current_user)):
+    return get_notifications(user["email"])
+
+@app.get("/api/gestion/sla-etapas")
+def api_stage_sla(user=Depends(require_roles("validador", "admin"))):
+    return get_stage_sla_metrics()
+
+@app.get("/api/gestion/escalaciones")
+def api_escalations(user=Depends(require_roles("validador", "admin"))):
+    return get_escalations()
+
+@app.post("/api/notificaciones/leer")
+def api_read_notifications(user=Depends(get_current_user)):
+    mark_notifications_read(user["email"])
+    return {"status": "ok"}
+
 # --- Endpoints de Redigitación ---
 
 @app.get("/api/redigitacion")
-def api_get_redigitacion(estado_redigitacion: Optional[str] = None, search: Optional[str] = None):
-    return get_pqrs_redigitacion(estado_redigitacion=estado_redigitacion, search=search)
+def api_get_redigitacion(estado_redigitacion: Optional[str] = None, search: Optional[str] = None, user=Depends(require_roles("redigitador", "admin"))):
+    items = get_pqrs_redigitacion(estado_redigitacion=estado_redigitacion, search=search)
+    if user["rol"] == "redigitador":
+        items = [item for item in items if item.get("asignado_redigitador_email") == user["email"]]
+    return items
 
 @app.post("/api/pqr/{pqr_id}/redigitar")
-def api_redigitar_pqr(pqr_id: int, data: PQRRedigitar):
+def api_redigitar_pqr(pqr_id: int, data: PQRRedigitar, user=Depends(require_roles("redigitador", "admin"))):
     existing = get_pqr_by_id(pqr_id)
     if not existing:
         raise HTTPException(status_code=404, detail="PQR no encontrada")
     if existing.get("requiere_redigitacion") != 1:
         raise HTTPException(status_code=400, detail="Esta PQR no está marcada para redigitación")
+    if user["rol"] == "redigitador" and existing.get("asignado_redigitador_email") != user["email"]:
+        raise HTTPException(status_code=403, detail="La PQR no está asignada a tu equipo")
     
     updated = redigitar_pqr(
         pqr_id=pqr_id,
         nuevo_numero_auditoria=data.nuevo_numero_auditoria,
         notas=data.notas,
-        redigitador_email=data.redigitador_email
+        redigitador_email=user["email"]
     )
+    if not updated:
+        raise HTTPException(status_code=400, detail="El número de auditoría ya existe o no fue posible actualizar la PQR")
+    return updated
+
+@app.post("/api/pqr/{pqr_id}/verificar-redigitacion")
+def api_verify_redigitacion(pqr_id: int, data: PQRVerification, user=Depends(require_roles("validador", "admin"))):
+    existing = get_pqr_by_id(pqr_id)
+    if user["rol"] == "validador" and existing and existing.get("asignado_validador_email") != user["email"]:
+        raise HTTPException(status_code=403, detail="La PQR no está asignada a tu usuario")
+    updated = verify_redigitacion(pqr_id, data.aprobado, data.comentario, user["email"])
+    if not updated:
+        raise HTTPException(status_code=400, detail="Solo puedes verificar una PQR ya redigitada")
+    return updated
+
+@app.post("/api/pqr/{pqr_id}/reabrir")
+def api_reopen_pqr(pqr_id: int, data: PQRReopen, user=Depends(require_roles("validador", "admin"))):
+    updated = reopen_pqr(pqr_id, data.motivo, user["email"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="PQR no encontrada")
+    return updated
+
+@app.post("/api/pqr/{pqr_id}/retroalimentacion")
+def api_feedback(pqr_id: int, data: PQRFeedback, user=Depends(require_roles("comercial"))):
+    updated = add_feedback(pqr_id, data.satisfactorio, data.comentario, user["email"])
+    if not updated:
+        raise HTTPException(status_code=403, detail="No puedes calificar esta PQR")
     return updated
 
 @app.get("/api/metrics")
-def api_get_metrics():
+def api_get_metrics(user=Depends(require_roles("validador", "admin"))):
     return get_metrics()
 
 # --- Exportación a Excel con Hoja de Casos y Hoja de Estadísticas de Validadores ---

@@ -67,13 +67,41 @@ class PQRResolve(BaseModel):
     tipologia: str
     adjudicable: Optional[str] = Field(None, description="IT, Comercial, Campo, Validación")
     respuesta: str = Field(..., min_length=3)
-    validador_email: Optional[str] = "validador@empresa.com"
     requiere_redigitacion: Optional[bool] = False
 
 class PQRRedigitar(BaseModel):
     nuevo_numero_auditoria: str = Field(..., min_length=2)
     notas: Optional[str] = None
-    redigitador_email: Optional[str] = "redigitador@empresa.com"
+
+    @field_validator("nuevo_numero_auditoria")
+    @classmethod
+    def clean_audit_number(cls, v: str) -> str:
+        clean = v.strip().upper()
+        if not re.match(r"^[A-Z0-9][A-Z0-9._/-]{1,49}$", clean):
+            raise ValueError("El número de auditoría solo puede usar letras, números, punto, guion, guion bajo o barra")
+        return clean
+
+class PQRAssignment(BaseModel):
+    assignee_email: str = Field(..., min_length=3)
+
+    @field_validator("assignee_email")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if not re.match(EMAIL_REGEX, clean):
+            raise ValueError("Formato de correo electrónico inválido")
+        return clean
+
+class PQRVerification(BaseModel):
+    aprobado: bool
+    comentario: str = Field(..., min_length=3, max_length=2000)
+
+class PQRReopen(BaseModel):
+    motivo: str = Field(..., min_length=3, max_length=2000)
+
+class PQRFeedback(BaseModel):
+    satisfactorio: bool
+    comentario: Optional[str] = Field(None, max_length=2000)
 
 class TipologiaCreate(BaseModel):
     nombre: str = Field(..., min_length=3)

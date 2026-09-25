@@ -149,6 +149,31 @@ def init_db():
             )
         """)
 
+        # Registro inmutable de cada transición y bandeja de alertas internas.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pqr_timeline (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pqr_id INTEGER NOT NULL,
+                actor_email TEXT,
+                accion TEXT NOT NULL,
+                detalle TEXT,
+                fecha TEXT NOT NULL,
+                FOREIGN KEY (pqr_id) REFERENCES pqr_requests(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email TEXT NOT NULL,
+                titulo TEXT NOT NULL,
+                mensaje TEXT NOT NULL,
+                pqr_id INTEGER,
+                leida INTEGER NOT NULL DEFAULT 0,
+                fecha TEXT NOT NULL,
+                FOREIGN KEY (pqr_id) REFERENCES pqr_requests(id)
+            )
+        """)
+
         # Migración defensiva si la tabla ya existía
         new_cols = [
             ("requiere_redigitacion", "INTEGER DEFAULT 0"),
@@ -157,13 +182,28 @@ def init_db():
             ("fecha_redigitacion", "TEXT DEFAULT NULL"),
             ("redigitador_email", "TEXT DEFAULT NULL"),
             ("notas_redigitacion", "TEXT DEFAULT NULL"),
-            ("adjudicable", "TEXT DEFAULT NULL")
+            ("adjudicable", "TEXT DEFAULT NULL"),
+            ("asignado_validador_email", "TEXT DEFAULT NULL"),
+            ("asignado_redigitador_email", "TEXT DEFAULT NULL"),
+            ("fecha_asignacion_validador", "TEXT DEFAULT NULL"),
+            ("fecha_asignacion_redigitador", "TEXT DEFAULT NULL"),
+            ("fecha_verificacion", "TEXT DEFAULT NULL"),
+            ("verificado_por_email", "TEXT DEFAULT NULL"),
+            ("comentario_verificacion", "TEXT DEFAULT NULL"),
+            ("fecha_cierre", "TEXT DEFAULT NULL"),
+            ("satisfactorio", "INTEGER DEFAULT NULL"),
+            ("comentario_satisfaccion", "TEXT DEFAULT NULL")
         ]
         for col_name, col_type in new_cols:
             try:
                 cursor.execute(f"ALTER TABLE pqr_requests ADD COLUMN {col_name} {col_type}")
             except Exception:
                 pass
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pqr_auditoria_unique ON pqr_requests(nuevo_numero_auditoria) WHERE nuevo_numero_auditoria IS NOT NULL")
+        except sqlite3.IntegrityError:
+            # No interrumpe una base histórica que ya tenga duplicados; la API los validará al crear nuevos registros.
+            pass
         
         # Tabla de catálogo de tipologías
         cursor.execute("""
@@ -254,6 +294,33 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, nombre, email, rol, activo, fecha_creacion FROM users WHERE LOWER(email) = LOWER(?)", (email.strip(),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def get_active_users_by_role(rol: str) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, nombre, email, rol FROM users WHERE rol = ? AND activo = 1 ORDER BY nombre", (rol,))
+        return [dict(row) for row in cursor.fetchall()]
+
+def _add_timeline(cursor, pqr_id: int, actor_email: Optional[str], accion: str, detalle: Optional[str] = None):
+    cursor.execute(
+        "INSERT INTO pqr_timeline (pqr_id, actor_email, accion, detalle, fecha) VALUES (?, ?, ?, ?, ?)",
+        (pqr_id, actor_email, accion, detalle, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+
+def _notify(cursor, user_email: Optional[str], titulo: str, mensaje: str, pqr_id: int):
+    if not user_email:
+        return
+    cursor.execute(
+        "INSERT INTO notifications (user_email, titulo, mensaje, pqr_id, fecha) VALUES (?, ?, ?, ?, ?)",
+        (user_email.lower().strip(), titulo, mensaje, pqr_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+
 def update_user(user_id: int, nombre: str, email: str, rol: str, activo: int, password: Optional[str] = None) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
@@ -329,7 +396,7 @@ def create_pqr(data: Dict[str, Any]) -> Dict[str, Any]:
             INSERT INTO pqr_requests (
                 consecutivo, comercial_email, id_pdv, cliente, pais, error,
                 adjunto_nombre, adjunto_ruta, estado, fecha_creacion
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Radicado', ?)
         """, (
             consecutivo,
             data['comercial_email'].strip().lower(),
@@ -341,9 +408,25 @@ def create_pqr(data: Dict[str, Any]) -> Dict[str, Any]:
             data.get('adjunto_ruta'),
             now_str
         ))
-        conn.commit()
         inserted_id = cursor.lastrowid
+        _add_timeline(cursor, inserted_id, data['comercial_email'], "PQR radicado", "Solicitud creada por el equipo comercial")
+        _notify(cursor, data['comercial_email'], "PQR radicado", f"El caso {consecutivo} quedó radicado y será asignado para validación.", inserted_id)
+        conn.commit()
         return get_pqr_by_id(inserted_id)
+
+def find_possible_duplicate(comercial_email: str, id_pdv: str, error: str) -> Optional[Dict[str, Any]]:
+    """Busca una radicación abierta con el mismo PDV y descripción durante los últimos 30 días."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM pqr_requests
+            WHERE LOWER(comercial_email) = LOWER(?) AND LOWER(id_pdv) = LOWER(?) AND LOWER(error) = LOWER(?)
+              AND fecha_creacion >= datetime('now', '-30 days')
+              AND estado NOT IN ('Cerrado', 'No Aplica')
+            ORDER BY id DESC LIMIT 1
+        """, (comercial_email.strip(), id_pdv.strip(), error.strip()))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
 def get_pqr_by_id(pqr_id: int) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
@@ -389,6 +472,7 @@ def resolve_pqr(pqr_id: int, estado: str, aplica: str, tipologia: str, respuesta
         
         req_redig_int = 1 if (requiere_redigitacion and aplica == "Aplica") else 0
         estado_redig = "Pendiente" if req_redig_int == 1 else "No Aplica"
+        workflow_status = "Pendiente de Redigitación" if req_redig_int else ("No Aplica" if aplica == "No Aplica" else "Cerrado")
         
         cursor.execute("""
             UPDATE pqr_requests
@@ -406,7 +490,7 @@ def resolve_pqr(pqr_id: int, estado: str, aplica: str, tipologia: str, respuesta
                 END
             WHERE id = ?
         """, (
-            estado,
+            workflow_status,
             aplica,
             tipologia,
             adjudicable.strip() if adjudicable else None,
@@ -417,6 +501,21 @@ def resolve_pqr(pqr_id: int, estado: str, aplica: str, tipologia: str, respuesta
             estado_redig,
             pqr_id
         ))
+        _add_timeline(cursor, pqr_id, validador_email, "Dictamen registrado", f"Dictamen: {aplica}. Estado: {workflow_status}.")
+        if req_redig_int:
+            cursor.execute("SELECT asignado_redigitador_email FROM pqr_requests WHERE id = ?", (pqr_id,))
+            assigned = cursor.fetchone()[0]
+            if not assigned:
+                cursor.execute("SELECT email FROM users WHERE rol = 'redigitador' AND activo = 1 ORDER BY id LIMIT 1")
+                fallback = cursor.fetchone()
+                if fallback:
+                    assigned = fallback[0]
+                    cursor.execute("UPDATE pqr_requests SET asignado_redigitador_email = ?, fecha_asignacion_redigitador = ? WHERE id = ?", (assigned, now_str, pqr_id))
+                    _add_timeline(cursor, pqr_id, validador_email, "Redigitación asignada", f"Asignación automática a {assigned}")
+            _notify(cursor, assigned, "Redigitación requerida", f"La PQR requiere redigitación y está lista para gestión.", pqr_id)
+        else:
+            cursor.execute("SELECT comercial_email FROM pqr_requests WHERE id = ?", (pqr_id,))
+            _notify(cursor, cursor.fetchone()[0], "PQR dictaminada", f"Tu PQR fue cerrada con dictamen: {aplica}.", pqr_id)
         conn.commit()
         return get_pqr_by_id(pqr_id)
 
@@ -424,23 +523,167 @@ def redigitar_pqr(pqr_id: int, nuevo_numero_auditoria: str, notas: Optional[str]
     with get_db() as conn:
         cursor = conn.cursor()
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute("""
-            UPDATE pqr_requests
-            SET nuevo_numero_auditoria = ?,
-                notas_redigitacion = ?,
-                fecha_redigitacion = ?,
-                redigitador_email = ?,
-                estado_redigitacion = 'Redigitado'
-            WHERE id = ?
-        """, (
-            nuevo_numero_auditoria.strip(),
-            notas.strip() if notas else None,
-            now_str,
-            (redigitador_email or "redigitador@empresa.com").strip().lower(),
-            pqr_id
-        ))
+        try:
+            cursor.execute("""
+                UPDATE pqr_requests
+                SET nuevo_numero_auditoria = ?,
+                    notas_redigitacion = ?,
+                    fecha_redigitacion = ?,
+                    redigitador_email = ?,
+                    estado_redigitacion = 'Redigitado',
+                    estado = 'Pendiente de Verificación'
+                WHERE id = ?
+            """, (
+                nuevo_numero_auditoria.strip(),
+                notas.strip() if notas else None,
+                now_str,
+                (redigitador_email or "redigitador@empresa.com").strip().lower(),
+                pqr_id
+            ))
+        except sqlite3.IntegrityError:
+            return None
+        _add_timeline(cursor, pqr_id, redigitador_email, "Redigitación completada", f"Nuevo número de auditoría: {nuevo_numero_auditoria.strip()}")
+        cursor.execute("SELECT asignado_validador_email, comercial_email FROM pqr_requests WHERE id = ?", (pqr_id,))
+        row = cursor.fetchone()
+        _notify(cursor, row[0], "Verificación pendiente", "La redigitación fue completada y requiere verificación final.", pqr_id)
+        _notify(cursor, row[1], "PQR redigitada", "El equipo registró un nuevo número de auditoría; el caso está en verificación final.", pqr_id)
         conn.commit()
         return get_pqr_by_id(pqr_id)
+
+def assign_pqr(pqr_id: int, assignee_email: str, assignment_type: str, actor_email: str) -> Optional[Dict[str, Any]]:
+    """Asigna el caso a un validador o redigitador activo y deja evidencia en la línea de tiempo."""
+    column = "asignado_validador_email" if assignment_type == "validador" else "asignado_redigitador_email"
+    date_column = "fecha_asignacion_validador" if assignment_type == "validador" else "fecha_asignacion_redigitador"
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT rol, activo FROM users WHERE LOWER(email) = LOWER(?)", (assignee_email.strip(),))
+        person = cursor.fetchone()
+        if not person or person[0] != assignment_type or person[1] != 1:
+            return None
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status_update = ", estado = 'En Validación'" if assignment_type == "validador" else ""
+        cursor.execute(f"UPDATE pqr_requests SET {column} = ?, {date_column} = ?{status_update} WHERE id = ?", (assignee_email.lower().strip(), now, pqr_id))
+        if cursor.rowcount == 0:
+            return None
+        label = "validador" if assignment_type == "validador" else "redigitador"
+        _add_timeline(cursor, pqr_id, actor_email, f"Asignación de {label}", f"Asignado a {assignee_email.lower().strip()}")
+        _notify(cursor, assignee_email, "Nuevo caso asignado", f"Tienes una PQR asignada para {label}.", pqr_id)
+        conn.commit()
+        return get_pqr_by_id(pqr_id)
+
+def verify_redigitacion(pqr_id: int, aprobado: bool, comentario: str, validator_email: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pqr_requests WHERE id = ?", (pqr_id,))
+        pqr = cursor.fetchone()
+        if not pqr or pqr["estado_redigitacion"] != "Redigitado":
+            return None
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if aprobado:
+            cursor.execute("""UPDATE pqr_requests SET estado = 'Cerrado', estado_redigitacion = 'Verificado',
+                fecha_verificacion = ?, verificado_por_email = ?, comentario_verificacion = ?, fecha_cierre = ? WHERE id = ?""",
+                (now, validator_email.lower().strip(), comentario.strip(), now, pqr_id))
+            action, notification = "Redigitación verificada", "La redigitación fue verificada y el caso se cerró definitivamente."
+        else:
+            cursor.execute("""UPDATE pqr_requests SET estado = 'Pendiente de Redigitación', estado_redigitacion = 'Devuelto',
+                fecha_verificacion = ?, verificado_por_email = ?, comentario_verificacion = ? WHERE id = ?""",
+                (now, validator_email.lower().strip(), comentario.strip(), pqr_id))
+            action, notification = "Redigitación devuelta", "La validación devolvió la redigitación con observaciones."
+        _add_timeline(cursor, pqr_id, validator_email, action, comentario.strip())
+        _notify(cursor, pqr["asignado_redigitador_email"], action, notification, pqr_id)
+        _notify(cursor, pqr["comercial_email"], action, notification, pqr_id)
+        conn.commit()
+        return get_pqr_by_id(pqr_id)
+
+def reopen_pqr(pqr_id: int, motivo: str, actor_email: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT comercial_email, asignado_validador_email FROM pqr_requests WHERE id = ?", (pqr_id,))
+        pqr = cursor.fetchone()
+        if not pqr:
+            return None
+        cursor.execute("UPDATE pqr_requests SET estado = 'Reabierto', fecha_cierre = NULL WHERE id = ?", (pqr_id,))
+        _add_timeline(cursor, pqr_id, actor_email, "PQR reabierta", motivo.strip())
+        _notify(cursor, pqr[1], "PQR reabierta", f"El caso fue reabierto: {motivo.strip()}", pqr_id)
+        _notify(cursor, pqr[0], "PQR reabierta", f"Tu caso fue reabierto: {motivo.strip()}", pqr_id)
+        conn.commit()
+        return get_pqr_by_id(pqr_id)
+
+def add_feedback(pqr_id: int, satisfactorio: bool, comentario: Optional[str], comercial_email: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT comercial_email FROM pqr_requests WHERE id = ?", (pqr_id,))
+        pqr = cursor.fetchone()
+        if not pqr or pqr[0].lower() != comercial_email.lower().strip():
+            return None
+        cursor.execute("UPDATE pqr_requests SET satisfactorio = ?, comentario_satisfaccion = ? WHERE id = ?", (1 if satisfactorio else 0, (comentario or '').strip() or None, pqr_id))
+        _add_timeline(cursor, pqr_id, comercial_email, "Retroalimentación registrada", "Satisfactorio" if satisfactorio else (comentario or "No satisfactorio"))
+        conn.commit()
+        return get_pqr_by_id(pqr_id)
+
+def get_timeline(pqr_id: int) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pqr_timeline WHERE pqr_id = ? ORDER BY id DESC", (pqr_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+def get_notifications(user_email: str) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notifications WHERE LOWER(user_email) = LOWER(?) ORDER BY id DESC LIMIT 30", (user_email.strip(),))
+        return [dict(row) for row in cursor.fetchall()]
+
+def mark_notifications_read(user_email: str) -> None:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notifications SET leida = 1 WHERE LOWER(user_email) = LOWER(?)", (user_email.strip(),))
+        conn.commit()
+
+def get_stage_sla_metrics() -> Dict[str, Any]:
+    """Mide cada tramo del proceso para detectar el cuello de botella, no solo el SLA total."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stages = {
+        "validacion": {"nombre": "Radicación a dictamen", "meta_horas": 24.0, "hours": []},
+        "redigitacion": {"nombre": "Redigitación", "meta_horas": 24.0, "hours": []},
+        "verificacion": {"nombre": "Verificación final", "meta_horas": 12.0, "hours": []},
+    }
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pqr_requests")
+        for pqr in [dict(row) for row in cursor.fetchall()]:
+            if pqr.get("fecha_creacion") and pqr.get("fecha_resolucion"):
+                stages["validacion"]["hours"].append(calculate_sla_business_hours(pqr["fecha_creacion"], pqr["fecha_resolucion"]))
+            if pqr.get("fecha_asignacion_redigitador") and pqr.get("fecha_redigitacion"):
+                stages["redigitacion"]["hours"].append(calculate_sla_business_hours(pqr["fecha_asignacion_redigitador"], pqr["fecha_redigitacion"]))
+            if pqr.get("fecha_redigitacion") and pqr.get("fecha_verificacion"):
+                stages["verificacion"]["hours"].append(calculate_sla_business_hours(pqr["fecha_redigitacion"], pqr["fecha_verificacion"]))
+    result = []
+    for item in stages.values():
+        values = item.pop("hours")
+        avg = round(sum(values) / len(values), 1) if values else 0.0
+        result.append({**item, "casos_medidos": len(values), "promedio_horas": avg, "cumple_meta": avg <= item["meta_horas"] if values else True})
+    return {"etapas": result}
+
+def get_escalations() -> List[Dict[str, Any]]:
+    """Lista casos abiertos fuera de la meta de su etapa actual para gestionarlos de inmediato."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    alerts = []
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pqr_requests WHERE estado NOT IN ('Cerrado', 'No Aplica', 'Resuelto', 'Rechazado')")
+        for pqr in [dict(row) for row in cursor.fetchall()]:
+            if pqr["estado"] in ("Pendiente de Redigitación", "Reabierto"):
+                start, target, stage = pqr.get("fecha_asignacion_redigitador") or pqr.get("fecha_resolucion"), 24.0, "Redigitación"
+            elif pqr["estado"] == "Pendiente de Verificación":
+                start, target, stage = pqr.get("fecha_redigitacion"), 12.0, "Verificación final"
+            else:
+                start, target, stage = pqr.get("fecha_asignacion_validador") or pqr.get("fecha_creacion"), 24.0, "Validación"
+            if not start:
+                continue
+            elapsed = calculate_sla_business_hours(start, now)
+            if elapsed > target:
+                alerts.append({"id": pqr["id"], "consecutivo": pqr["consecutivo"], "etapa": stage, "horas": elapsed, "meta_horas": target, "responsable": pqr.get("asignado_redigitador_email") if stage == "Redigitación" else pqr.get("asignado_validador_email")})
+    return sorted(alerts, key=lambda item: item["horas"], reverse=True)
 
 def get_pqrs_redigitacion(estado_redigitacion: Optional[str] = None, search: Optional[str] = None) -> List[Dict[str, Any]]:
     with get_db() as conn:
@@ -468,13 +711,13 @@ def get_metrics() -> Dict[str, Any]:
         cursor.execute("SELECT COUNT(*) FROM pqr_requests")
         total = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado = 'Pendiente'")
+        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado IN ('Radicado', 'Pendiente', 'Reabierto')")
         pendientes = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado = 'En Revisión'")
+        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado IN ('En Revisión', 'En Validación')")
         en_revision = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado = 'Resuelto'")
+        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado IN ('Resuelto', 'Cerrado', 'No Aplica')")
         resueltos = cursor.fetchone()[0]
         
         cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado = 'Rechazado'")
@@ -501,6 +744,12 @@ def get_metrics() -> Dict[str, Any]:
 
         cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado_redigitacion = 'Redigitado'")
         redigitacion_completadas = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado = 'Pendiente de Verificación'")
+        verificaciones_pendientes = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM pqr_requests WHERE estado = 'Reabierto'")
+        reabiertos = cursor.fetchone()[0]
         
         return {
             "total": total,
@@ -514,7 +763,9 @@ def get_metrics() -> Dict[str, Any]:
             "tasa_aplica": tasa_aplica,
             "total_users": total_users,
             "redigitacion_pendientes": redigitacion_pendientes,
-            "redigitacion_completadas": redigitacion_completadas
+            "redigitacion_completadas": redigitacion_completadas,
+            "verificaciones_pendientes": verificaciones_pendientes,
+            "reabiertos": reabiertos
         }
 
 # --- Estadísticas de Validadores y SLA ---
