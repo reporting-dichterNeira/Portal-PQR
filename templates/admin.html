@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+
+{% block title %}Panel Administrativo - Gestión PQR{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header del Administrador -->
+    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+            <div class="flex items-center gap-2.5">
+                <span class="p-2 bg-purple-100 text-purple-700 rounded-xl">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                </span>
+                <div>
+                    <h1 class="text-xl font-black text-slate-900">Panel Administrativo Central</h1>
+                    <span class="text-xs text-slate-500">Gestión de usuarios comerciales y validadores, roles, contraseñas y catálogo de tipologías.</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button onclick="openNewUserModal()" class="px-4 py-2 text-xs sm:text-sm font-semibold bg-purple-700 hover:bg-purple-800 text-white rounded-xl shadow-sm transition-all flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                </svg>
+                <span>Nuevo Usuario</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Pestañas de Navegación del Admin -->
+    <div class="flex border-b border-slate-200 gap-4">
+        <button id="tab-btn-users" onclick="switchTab('users')" class="py-2.5 px-4 font-bold text-sm border-b-2 border-purple-700 text-purple-900 transition-colors flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+            </svg>
+            Usuarios y Perfiles
+        </button>
+        <button id="tab-btn-tipologias" onclick="switchTab('tipologias')" class="py-2.5 px-4 font-medium text-sm text-slate-500 hover:text-slate-900 transition-colors flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+            </svg>
+            Catálogo Exclusivo de Tipologías
+        </button>
+    </div>
+
+    <!-- Contenido Pestaña 1: Usuarios -->
+    <div id="tab-content-users" class="space-y-4">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+                <div>
+                    <h2 class="text-base font-bold text-slate-800">Usuarios Registrados en la Plataforma</h2>
+                    <p class="text-xs text-slate-500">Comerciales, Validadores y Administradores con acceso por correo y contraseña.</p>
+                </div>
+                <span id="users-count" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">0 usuarios</span>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs sm:text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px] tracking-wider">
+                            <th class="py-3.5 px-4">ID</th>
+                            <th class="py-3.5 px-4">Nombre Completo</th>
+                            <th class="py-3.5 px-4">Correo Corporativo</th>
+                            <th class="py-3.5 px-4">Rol Asignado</th>
+                            <th class="py-3.5 px-4">Estado</th>
+                            <th class="py-3.5 px-4">Fecha Registro</th>
+                            <th class="py-3.5 px-4 text-center">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body" class="divide-y divide-slate-100 text-slate-700">
+                        <tr>
+                            <td colspan="7" class="py-10 text-center text-slate-400">Cargando usuarios...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contenido Pestaña 2: Tipologías -->
+    <div id="tab-content-tipologias" class="space-y-4 hidden">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
+            
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200">
+                <div>
+                    <h2 class="text-base font-bold text-slate-800">Catálogo Oficial de Tipologías PQR</h2>
+                    <p class="text-xs text-slate-500">Estas son las únicas opciones que el equipo validador podrá seleccionar al resolver un caso.</p>
+                </div>
+
+                <!-- Formulario de Agregar Tipología -->
+                <form onsubmit="handleNewTipologia(event)" class="flex gap-2 w-full sm:w-auto">
+                    <input type="text" id="admin-new-tipologia-input" required placeholder="Nombre de nueva tipología..."
+                        class="px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none w-full sm:w-80">
+                    <button type="submit" class="px-4 py-2 text-xs sm:text-sm font-semibold bg-purple-700 hover:bg-purple-800 text-white rounded-xl shadow-sm whitespace-nowrap">
+                        + Agregar
+                    </button>
+                </form>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs sm:text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px] tracking-wider">
+                            <th class="py-3 px-4 w-16">ID</th>
+                            <th class="py-3 px-4">Nombre de la Tipología</th>
+                            <th class="py-3 px-4 text-center w-28">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tipologias-table-body" class="divide-y divide-slate-100 text-slate-700">
+                        <tr>
+                            <td colspan="3" class="py-8 text-center text-slate-400">Cargando catálogo...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal: Crear Nuevo Usuario -->
+<div id="new-user-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden transform transition-all">
+        <div class="px-6 py-4 bg-purple-800 text-white flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                </svg>
+                <h3 class="font-bold text-base">Registrar Nuevo Usuario</h3>
+            </div>
+            <button onclick="closeNewUserModal()" class="text-white/70 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+
+        <form onsubmit="handleCreateUser(event)" class="p-6 space-y-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
+                <input type="text" id="new-user-nombre" required placeholder="Ej: Pedro Perez"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Correo Electrónico <span class="text-rose-500">*</span></label>
+                <input type="email" id="new-user-email" required placeholder="pedro.perez@empresa.com"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Rol en el Portal <span class="text-rose-500">*</span></label>
+                <select id="new-user-rol" required class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none font-medium">
+                    <option value="comercial">Comercial (Radica y consulta casos)</option>
+                    <option value="validador">Validador (Revisa, dictamina y resuelve)</option>
+                    <option value="redigitador">Redigitador (Procesa y asigna N° auditoría)</option>
+                    <option value="admin">Administrador (Control total del portal)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Contraseña de Acceso <span class="text-rose-500">*</span></label>
+                <input type="password" id="new-user-password" required minlength="4" placeholder="••••••••"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none">
+            </div>
+
+            <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                <button type="button" onclick="closeNewUserModal()" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                <button type="submit" id="btn-save-user" class="px-4 py-2 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-lg shadow-sm">Crear Usuario</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Editar Usuario -->
+<div id="edit-user-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+            <h3 class="font-bold text-base">Modificar Usuario</h3>
+            <button onclick="closeEditUserModal()" class="text-white/70 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+
+        <form onsubmit="handleUpdateUser(event)" class="p-6 space-y-4">
+            <input type="hidden" id="edit-user-id">
+            
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Nombre Completo</label>
+                <input type="text" id="edit-user-nombre" required class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Correo Electrónico</label>
+                <input type="email" id="edit-user-email" required class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Rol</label>
+                <select id="edit-user-rol" required class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none font-medium">
+                    <option value="comercial">Comercial</option>
+                    <option value="validador">Validador</option>
+                    <option value="redigitador">Redigitador</option>
+                    <option value="admin">Administrador</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Estado</label>
+                <select id="edit-user-activo" required class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none font-medium">
+                    <option value="1">Activo (Puede ingresar)</option>
+                    <option value="0">Inactivo (Acceso bloqueado)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Cambiar Contraseña <span class="text-slate-400 font-normal lowercase">(dejar en blanco para mantener la actual)</span>
+                </label>
+                <input type="password" id="edit-user-password" placeholder="Nueva contraseña opcional"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 outline-none">
+            </div>
+
+            <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                <button type="button" onclick="closeEditUserModal()" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                <button type="submit" class="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm">Guardar Cambios</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let usersList = [];
+    let tipologiasDetail = [];
+
+    document.getElementById('nav-admin').classList.add('bg-purple-50', 'text-purple-700', 'font-semibold');
+
+    function switchTab(tab) {
+        const uTab = document.getElementById('tab-content-users');
+        const tTab = document.getElementById('tab-content-tipologias');
+        const uBtn = document.getElementById('tab-btn-users');
+        const tBtn = document.getElementById('tab-btn-tipologias');
+
+        if (tab === 'users') {
+            uTab.classList.remove('hidden');
+            tTab.classList.add('hidden');
+            uBtn.className = 'py-2.5 px-4 font-bold text-sm border-b-2 border-purple-700 text-purple-900 transition-colors flex items-center gap-2';
+            tBtn.className = 'py-2.5 px-4 font-medium text-sm text-slate-500 hover:text-slate-900 transition-colors flex items-center gap-2';
+        } else {
+            uTab.classList.add('hidden');
+            tTab.classList.remove('hidden');
+            tBtn.className = 'py-2.5 px-4 font-bold text-sm border-b-2 border-purple-700 text-purple-900 transition-colors flex items-center gap-2';
+            uBtn.className = 'py-2.5 px-4 font-medium text-sm text-slate-500 hover:text-slate-900 transition-colors flex items-center gap-2';
+        }
+    }
+
+    async function loadAdminData() {
+        try {
+            const [uRes, tRes] = await Promise.all([
+                fetch('/api/admin/users'),
+                fetch('/api/admin/tipologias-detail')
+            ]);
+
+            usersList = await uRes.json();
+            tipologiasDetail = await tRes.json();
+
+            renderUsersTable();
+            renderTipologiasTable();
+        } catch (err) {
+            console.error(err);
+            showToast('Error cargando información del panel administrativo', 'error');
+        }
+    }
+
+    function renderUsersTable() {
+        const tbody = document.getElementById('users-table-body');
+        document.getElementById('users-count').innerText = `${usersList.length} usuarios`;
+
+        if (!usersList.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-400">No hay usuarios registrados.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = usersList.map(u => {
+            let rolBadge = '';
+            if (u.rol === 'admin') rolBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800">Administrador</span>';
+            else if (u.rol === 'validador') rolBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800">Validador</span>';
+            else if (u.rol === 'redigitador') rolBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">Redigitador</span>';
+            else rolBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-800">Comercial</span>';
+
+            const statusBadge = u.activo === 1 ? 
+                '<span class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">Activo</span>' :
+                '<span class="px-2 py-0.5 rounded text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">Inactivo</span>';
+
+            return `
+                <tr class="hover:bg-slate-50/80 transition-colors">
+                    <td class="py-3 px-4 font-mono font-bold text-slate-500">${u.id}</td>
+                    <td class="py-3 px-4 font-semibold text-slate-800">${u.nombre}</td>
+                    <td class="py-3 px-4 text-xs font-mono text-slate-600">${u.email}</td>
+                    <td class="py-3 px-4">${rolBadge}</td>
+                    <td class="py-3 px-4">${statusBadge}</td>
+                    <td class="py-3 px-4 text-xs text-slate-500">${u.fecha_creacion.split(' ')[0]}</td>
+                    <td class="py-3 px-4 text-center whitespace-nowrap">
+                        <div class="flex items-center justify-center gap-1.5">
+                            <button onclick="openEditUserModal(${u.id})" class="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs transition-colors" title="Editar">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                </svg>
+                            </button>
+                            ${u.id !== 1 ? `
+                            <button onclick="deleteUserPrompt(${u.id}, '${u.email}')" class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs transition-colors" title="Eliminar">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function renderTipologiasTable() {
+        const tbody = document.getElementById('tipologias-table-body');
+        if (!tipologiasDetail.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="py-8 text-center text-slate-400">No hay tipologías registradas.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = tipologiasDetail.map(t => `
+            <tr class="hover:bg-slate-50 transition-colors">
+                <td class="py-3 px-4 font-mono font-bold text-slate-400">${t.id}</td>
+                <td class="py-3 px-4 font-medium text-slate-800">${t.nombre}</td>
+                <td class="py-3 px-4 text-center">
+                    <button onclick="deleteTipologiaPrompt(${t.id}, '${t.nombre}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold transition-colors">
+                        Eliminar
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function openNewUserModal() {
+        document.getElementById('new-user-modal').classList.remove('hidden');
+    }
+    function closeNewUserModal() {
+        document.getElementById('new-user-modal').classList.add('hidden');
+    }
+
+    async function handleCreateUser(e) {
+        e.preventDefault();
+        const payload = {
+            nombre: document.getElementById('new-user-nombre').value,
+            email: document.getElementById('new-user-email').value,
+            rol: document.getElementById('new-user-rol').value,
+            password: document.getElementById('new-user-password').value
+        };
+
+        try {
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Error al crear');
+            }
+
+            showToast('Usuario creado exitosamente', 'success');
+            closeNewUserModal();
+            loadAdminData();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    function openEditUserModal(userId) {
+        const u = usersList.find(x => x.id === userId);
+        if (!u) return;
+
+        document.getElementById('edit-user-id').value = u.id;
+        document.getElementById('edit-user-nombre').value = u.nombre;
+        document.getElementById('edit-user-email').value = u.email;
+        document.getElementById('edit-user-rol').value = u.rol;
+        document.getElementById('edit-user-activo').value = u.activo;
+        document.getElementById('edit-user-password').value = '';
+
+        document.getElementById('edit-user-modal').classList.remove('hidden');
+    }
+    function closeEditUserModal() {
+        document.getElementById('edit-user-modal').classList.add('hidden');
+    }
+
+    async function handleUpdateUser(e) {
+        e.preventDefault();
+        const userId = document.getElementById('edit-user-id').value;
+        const payload = {
+            nombre: document.getElementById('edit-user-nombre').value,
+            email: document.getElementById('edit-user-email').value,
+            rol: document.getElementById('edit-user-rol').value,
+            activo: parseInt(document.getElementById('edit-user-activo').value),
+            password: document.getElementById('edit-user-password').value || null
+        };
+
+        try {
+            const res = await fetch(`/api/admin/users/${userId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error('Error al actualizar');
+            showToast('Usuario actualizado exitosamente', 'success');
+            closeEditUserModal();
+            loadAdminData();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function deleteUserPrompt(userId, email) {
+        if (!confirm(`¿Estás seguro de eliminar el usuario ${email}?`)) return;
+        try {
+            const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Error al eliminar');
+            showToast('Usuario eliminado', 'success');
+            loadAdminData();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function handleNewTipologia(e) {
+        e.preventDefault();
+        const input = document.getElementById('admin-new-tipologia-input');
+        const nombre = input.value.trim();
+        if (!nombre) return;
+
+        try {
+            const res = await fetch('/api/tipologias', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nombre })
+            });
+            if (!res.ok) throw new Error('Error al agregar');
+            showToast('Tipología agregada al catálogo', 'success');
+            input.value = '';
+            loadAdminData();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function deleteTipologiaPrompt(id, nombre) {
+        if (!confirm(`¿Eliminar la tipología "${nombre}" del catálogo?`)) return;
+        try {
+            const res = await fetch(`/api/admin/tipologias/${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Error al eliminar');
+            showToast('Tipología eliminada', 'success');
+            loadAdminData();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', loadAdminData);
+</script>
+{% endblock %}

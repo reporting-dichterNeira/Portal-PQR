@@ -1,0 +1,433 @@
+{% extends "base.html" %}
+
+{% block title %}Bandeja de Redigitación - Portal PQR{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header del Módulo de Redigitación -->
+    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div class="flex items-center gap-3">
+            <span class="p-3 bg-amber-100 text-amber-800 rounded-xl">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                </svg>
+            </span>
+            <div>
+                <h1 class="text-xl font-bold text-slate-900">Bandeja de Gestión y Redigitación</h1>
+                <p class="text-xs text-slate-500">Gestión de casos con dictamen "Aplica" que requieren nuevo número de auditoría y corrección en el sistema.</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2.5 w-full sm:w-auto">
+            <button onclick="loadRedigitacionData()" class="px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-1.5 shadow-sm">
+                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <span>Actualizar Bandeja</span>
+            </button>
+            <a href="/api/pqr/export/excel" class="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm transition-all flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+                <span>Descargar Reporte Excel</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- KPI Cards de Redigitación -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white p-5 rounded-2xl border border-amber-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-amber-700 block">Pendientes por Redigitar</span>
+                <p id="kpi-redig-pendientes" class="text-3xl font-black text-amber-900 mt-1">0</p>
+                <span class="text-[10px] text-amber-600 mt-1 block">Requieren nuevo N° Auditoría</span>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center">
+                <svg class="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+        </div>
+
+        <div class="bg-white p-5 rounded-2xl border border-emerald-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block">Redigitados / Completados</span>
+                <p id="kpi-redig-completados" class="text-3xl font-black text-emerald-900 mt-1">0</p>
+                <span class="text-[10px] text-emerald-600 mt-1 block">Con N° de Auditoría asignado</span>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+        </div>
+
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Total Asignados a Redigitar</span>
+                <p id="kpi-redig-total" class="text-3xl font-black text-slate-800 mt-1">0</p>
+                <span class="text-[10px] text-slate-400 mt-1 block">Historias de casos remitidos</span>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- Barra de Filtros y Búsqueda -->
+    <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-3 items-center">
+        <div class="relative w-full md:w-96">
+            <input type="text" id="redig-search" placeholder="Buscar radicado, ID PDV, cliente, N° auditoría..." 
+                oninput="filterRedigitacionTable()"
+                class="w-full pl-9 pr-4 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none">
+            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end text-xs">
+            <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-500 uppercase text-[10px]">Filtro de Estado:</span>
+                <select id="filter-redig-estado" onchange="filterRedigitacionTable()" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white outline-none font-medium">
+                    <option value="Todos">Todos los casos</option>
+                    <option value="Pendiente" selected>Solo Pendientes</option>
+                    <option value="Redigitado">Solo Redigitados</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabla de Casos para Redigitación -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+            <div>
+                <h2 class="text-base font-bold text-slate-800">Casos Remitidos para Redigitación</h2>
+                <span class="text-xs text-slate-500">Dictamen de validación: Aplica y Requiere Re-ingreso de Auditoría</span>
+            </div>
+            <span id="redig-count" class="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">0 casos</span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs sm:text-sm">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[10px] tracking-wider">
+                        <th class="py-3.5 px-4">Radicado</th>
+                        <th class="py-3.5 px-4">ID PDV</th>
+                        <th class="py-3.5 px-4">Cliente / País</th>
+                        <th class="py-3.5 px-4">Error Reportado</th>
+                        <th class="py-3.5 px-4">Tipología</th>
+                        <th class="py-3.5 px-4">Dictamen Validador</th>
+                        <th class="py-3.5 px-4 text-center">Adjunto</th>
+                        <th class="py-3.5 px-4 text-center">Estado Redigitación</th>
+                        <th class="py-3.5 px-4">Nuevo N° Auditoría</th>
+                        <th class="py-3.5 px-4">Fecha Redigitación</th>
+                        <th class="py-3.5 px-4 text-center">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="redig-table-body" class="divide-y divide-slate-100 text-slate-700">
+                    <tr>
+                        <td colspan="11" class="py-12 text-center text-slate-400">Cargando cola de redigitación...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal para Registrar Nuevo Número de Auditoría -->
+<div id="redig-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8">
+        <div class="px-6 py-4 bg-gradient-to-r from-amber-600 to-amber-800 text-white flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <span id="modal-redig-consecutivo" class="px-2.5 py-1 bg-white/20 rounded-lg text-xs font-mono font-bold"></span>
+                <div>
+                    <h3 class="font-bold text-base">Registrar Redigitación</h3>
+                    <span class="text-xs text-amber-100">Asignar Nuevo Número de Auditoría</span>
+                </div>
+            </div>
+            <button onclick="closeRedigModal()" class="text-white/70 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+
+        <form id="redig-form" onsubmit="saveRedigitacion(event)" class="p-6 space-y-4">
+            <input type="hidden" id="modal-redig-id">
+
+            <!-- Resumen del caso -->
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs">
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <span class="text-[10px] font-bold uppercase text-slate-400 block">ID PDV</span>
+                        <span id="modal-redig-idpdv" class="font-bold text-slate-800"></span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="text-[10px] font-bold uppercase text-slate-400 block">Cliente</span>
+                        <span id="modal-redig-cliente" class="font-semibold text-slate-800 truncate block"></span>
+                    </div>
+                </div>
+
+                <div>
+                    <span class="text-[10px] font-bold uppercase text-slate-400 block">Error Notificado:</span>
+                    <p id="modal-redig-error" class="text-slate-700 bg-white p-2 rounded border border-slate-200 text-xs"></p>
+                </div>
+
+                <div>
+                    <span class="text-[10px] font-bold uppercase text-indigo-700 block">Dictamen / Respuesta del Validador:</span>
+                    <p id="modal-redig-respuesta-val" class="text-indigo-950 bg-indigo-50/70 p-2 rounded border border-indigo-100 text-xs italic"></p>
+                </div>
+            </div>
+
+            <!-- Campos de Redigitación -->
+            <div>
+                <label for="input-nuevo-numero-auditoria" class="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1">
+                    Nuevo Número de Auditoría <span class="text-rose-500">*</span>
+                </label>
+                <div class="relative">
+                    <input type="text" id="input-nuevo-numero-auditoria" required
+                        placeholder="Ej: AUD-2026-90451 o 8923412"
+                        class="w-full px-3.5 py-2.5 text-sm font-mono font-bold rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none text-slate-900 bg-amber-50/30">
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">Ingrese el código o consecutivo con el que quedó redigitada la información.</p>
+            </div>
+
+            <div>
+                <label for="input-notas-redigitacion" class="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1">
+                    Notas u Observaciones del Re-ingreso <span class="text-slate-400 font-normal">(Opcional)</span>
+                </label>
+                <textarea id="input-notas-redigitacion" rows="3"
+                    placeholder="Detalles adicionales sobre la re-digitación realizada, novedades del lote o fecha..."
+                    class="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 outline-none"></textarea>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center gap-2 text-xs text-amber-900">
+                <svg class="w-4 h-4 text-amber-700 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span>Al registrar, el estado cambiará a <strong>Redigitado</strong> y se estampará tu correo y la fecha/hora actual.</span>
+            </div>
+
+            <div class="pt-3 border-t border-slate-200 flex justify-end gap-3">
+                <button type="button" onclick="closeRedigModal()" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+                    Cancelar
+                </button>
+                <button type="submit" id="btn-save-redig" class="px-5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-md shadow-amber-600/20 transition-all flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    <span>Guardar y Asignar Auditoría</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let redigitacionList = [];
+
+    // Marcar enlace activo
+    const navLink = document.getElementById('nav-redigitacion');
+    if (navLink) navLink.classList.add('bg-amber-50', 'text-amber-800', 'font-semibold');
+
+    async function loadRedigitacionData() {
+        try {
+            const res = await fetch('/api/redigitacion');
+            if (!res.ok) throw new Error('Error al cargar datos de redigitación');
+            redigitacionList = await res.json();
+
+            // Calcular KPIs
+            const pendientes = redigitacionList.filter(p => p.estado_redigitacion === 'Pendiente').length;
+            const completados = redigitacionList.filter(p => p.estado_redigitacion === 'Redigitado').length;
+            const total = redigitacionList.length;
+
+            document.getElementById('kpi-redig-pendientes').innerText = pendientes;
+            document.getElementById('kpi-redig-completados').innerText = completados;
+            document.getElementById('kpi-redig-total').innerText = total;
+
+            filterRedigitacionTable();
+        } catch (err) {
+            console.error(err);
+            showToast('Error cargando solicitudes de redigitación.', 'error');
+        }
+    }
+
+    function filterRedigitacionTable() {
+        const query = document.getElementById('redig-search').value.toLowerCase().trim();
+        const estadoFiltro = document.getElementById('filter-redig-estado').value;
+
+        const filtered = redigitacionList.filter(p => {
+            const matchesQuery = !query ||
+                p.consecutivo.toLowerCase().includes(query) ||
+                p.id_pdv.toLowerCase().includes(query) ||
+                p.cliente.toLowerCase().includes(query) ||
+                p.pais.toLowerCase().includes(query) ||
+                p.error.toLowerCase().includes(query) ||
+                (p.nuevo_numero_auditoria && p.nuevo_numero_auditoria.toLowerCase().includes(query)) ||
+                (p.tipologia && p.tipologia.toLowerCase().includes(query));
+
+            let matchesEstado = true;
+            if (estadoFiltro !== 'Todos') {
+                matchesEstado = p.estado_redigitacion === estadoFiltro;
+            }
+
+            return matchesQuery && matchesEstado;
+        });
+
+        renderRedigitacionTable(filtered);
+    }
+
+    function renderRedigitacionTable(list) {
+        const tbody = document.getElementById('redig-table-body');
+        document.getElementById('redig-count').innerText = `${list.length} casos`;
+
+        if (!list || list.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="11" class="py-12 text-center text-slate-400">No hay casos en la cola de redigitación con estos filtros.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = list.map(p => {
+            let stBadge = '';
+            if (p.estado_redigitacion === 'Pendiente') {
+                stBadge = '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>Pendiente</span>';
+            } else if (p.estado_redigitacion === 'Redigitado') {
+                stBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">✓ Redigitado</span>';
+            } else {
+                stBadge = `<span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">${p.estado_redigitacion || 'No aplica'}</span>`;
+            }
+
+            let auditPill = '<span class="text-slate-300 italic text-xs">Sin asignar</span>';
+            if (p.nuevo_numero_auditoria) {
+                auditPill = `<span class="px-2 py-0.5 font-mono font-bold text-xs bg-purple-50 text-purple-800 border border-purple-200 rounded">#${p.nuevo_numero_auditoria}</span>`;
+            }
+
+            let adjBadge = '<span class="text-slate-300">-</span>';
+            if (p.adjunto_ruta) {
+                const isImg = p.adjunto_nombre && /\.(png|jpg|jpeg|webp)$/i.test(p.adjunto_nombre);
+                adjBadge = `<a href="${p.adjunto_ruta}" target="_blank" class="px-2 py-0.5 text-[11px] font-semibold ${isImg ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'} rounded border">${isImg ? '🖼️ Ver' : '📊 Excel'}</a>`;
+            }
+
+            const btnActionText = p.estado_redigitacion === 'Pendiente' ? 'Redigitar' : 'Editar Auditoría';
+            const btnColor = p.estado_redigitacion === 'Pendiente' 
+                ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20' 
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300';
+
+            return `
+                <tr class="hover:bg-slate-50/80 transition-colors">
+                    <td class="py-3 px-4 font-mono font-bold text-amber-900">${p.consecutivo}</td>
+                    <td class="py-3 px-4 font-mono font-semibold text-slate-800 text-xs">${p.id_pdv}</td>
+                    <td class="py-3 px-4">
+                        <span class="font-semibold text-slate-800 block">${p.cliente}</span>
+                        <span class="text-[11px] text-slate-500">${p.pais}</span>
+                    </td>
+                    <td class="py-3 px-4 text-xs text-slate-600 max-w-xs truncate" title="${p.error}">${p.error}</td>
+                    <td class="py-3 px-4 text-xs">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                            ${p.tipologia || 'Sin tipología'}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 text-xs text-slate-600 max-w-xs truncate" title="${p.respuesta_validador || ''}">
+                        ${p.respuesta_validador || '<span class="text-slate-400 italic">Sin respuesta</span>'}
+                    </td>
+                    <td class="py-3 px-4 text-center">${adjBadge}</td>
+                    <td class="py-3 px-4 text-center whitespace-nowrap">${stBadge}</td>
+                    <td class="py-3 px-4 whitespace-nowrap">${auditPill}</td>
+                    <td class="py-3 px-4 text-xs font-mono text-slate-500 whitespace-nowrap">
+                        ${p.fecha_redigitacion ? p.fecha_redigitacion.split(' ')[0] : '-'}
+                        ${p.redigitador_email ? `<span class="block text-[10px] text-slate-400 truncate max-w-[120px]" title="${p.redigitador_email}">${p.redigitador_email}</span>` : ''}
+                    </td>
+                    <td class="py-3 px-4 text-center whitespace-nowrap">
+                        <button onclick="openRedigModal(${p.id})" class="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1 mx-auto ${btnColor}">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                            </svg>
+                            <span>${btnActionText}</span>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function openRedigModal(id) {
+        const p = redigitacionList.find(item => item.id === id);
+        if (!p) return;
+
+        document.getElementById('modal-redig-id').value = p.id;
+        document.getElementById('modal-redig-consecutivo').innerText = p.consecutivo;
+        document.getElementById('modal-redig-idpdv').innerText = p.id_pdv;
+        document.getElementById('modal-redig-cliente').innerText = `${p.cliente} (${p.pais})`;
+        document.getElementById('modal-redig-error').innerText = p.error;
+        document.getElementById('modal-redig-respuesta-val').innerText = p.respuesta_validador || 'Sin observaciones adicionales';
+
+        document.getElementById('input-nuevo-numero-auditoria').value = p.nuevo_numero_auditoria || '';
+        document.getElementById('input-notas-redigitacion').value = p.notas_redigitacion || '';
+
+        document.getElementById('redig-modal').classList.remove('hidden');
+        setTimeout(() => document.getElementById('input-nuevo-numero-auditoria').focus(), 100);
+    }
+
+    function closeRedigModal() {
+        document.getElementById('redig-modal').classList.add('hidden');
+    }
+
+    async function saveRedigitacion(e) {
+        e.preventDefault();
+        const pqrId = document.getElementById('modal-redig-id').value;
+        const nuevoNum = document.getElementById('input-nuevo-numero-auditoria').value.trim();
+        const notas = document.getElementById('input-notas-redigitacion').value.trim();
+
+        if (!nuevoNum) {
+            showToast('El nuevo número de auditoría es obligatorio.', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btn-save-redig');
+        btn.disabled = true;
+        btn.innerHTML = 'Guardando...';
+
+        const userStr = localStorage.getItem('pqr_user');
+        let userEmail = 'redigitador@empresa.com';
+        if (userStr) {
+            try { userEmail = JSON.parse(userStr).email; } catch(err){}
+        }
+
+        try {
+            const res = await fetch(`/api/pqr/${pqrId}/redigitar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nuevo_numero_auditoria: nuevoNum,
+                    notas: notas,
+                    redigitador_email: userEmail
+                })
+            });
+
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || 'Error al guardar redigitación');
+            }
+
+            const updated = await res.json();
+            showToast(`Redigitación registrada exitosamente con Auditoría #${updated.nuevo_numero_auditoria}`, 'success');
+            closeRedigModal();
+            loadRedigitacionData();
+        } catch (err) {
+            console.error(err);
+            showToast(err.message || 'Error al guardar redigitación.', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span>Guardar y Asignar Auditoría</span>
+            `;
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', loadRedigitacionData);
+</script>
+{% endblock %}

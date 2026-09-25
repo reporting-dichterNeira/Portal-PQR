@@ -1,0 +1,538 @@
+{% extends "base.html" %}
+
+{% block title %}Área Comercial - Radicación PQR{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    
+    <!-- Header del Comercial -->
+    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-black text-xl">
+                <span id="user-initial">C</span>
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <h1 class="text-xl font-bold text-slate-900">Módulo Comercial de PQRs</h1>
+                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">Sesión Activa</span>
+                </div>
+                <p class="text-xs sm:text-sm text-slate-500 flex items-center gap-1.5 mt-0.5">
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.206"></path>
+                    </svg>
+                    <span id="current-email-display" class="font-medium text-slate-700 font-mono">{{ email }}</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3 w-full md:w-auto">
+            <button onclick="logout()" class="px-3 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">
+                Cerrar Sesión
+            </button>
+            <button onclick="openNewPqrModal()" class="flex-1 md:flex-none px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                <span>Nueva Solicitud PQR</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Barra de Filtros y Búsqueda -->
+    <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between gap-3 items-center">
+        <div class="relative w-full sm:w-80">
+            <input type="text" id="search-input" placeholder="Buscar por ID PDV, cliente, país, radicado..." 
+                oninput="filterRequests()"
+                class="w-full pl-9 pr-4 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 outline-none">
+            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+        </div>
+
+        <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <label class="text-xs font-bold text-slate-500 uppercase text-[11px]">Estado:</label>
+            <select id="status-filter" onchange="filterRequests()" class="text-xs sm:text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-sky-500">
+                <option value="Todos">Todos los Estados</option>
+                <option value="Pendiente">Pendiente</option>
+                <option value="En Revisión">En Revisión</option>
+                <option value="Resuelto">Resuelto</option>
+                <option value="Rechazado">Rechazado</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Tabla de Solicitudes -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+            <h2 class="text-base font-bold text-slate-800">Mis Solicitudes Radicadas</h2>
+            <span id="requests-count" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">0 solicitudes</span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs sm:text-sm">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px] tracking-wider">
+                        <th class="py-3.5 px-4">Radicado</th>
+                        <th class="py-3.5 px-4">ID PDV</th>
+                        <th class="py-3.5 px-4">Cliente</th>
+                        <th class="py-3.5 px-4">País</th>
+                        <th class="py-3.5 px-4">Error / Reporte</th>
+                        <th class="py-3.5 px-4 text-center">Adjunto</th>
+                        <th class="py-3.5 px-4">Estado</th>
+                        <th class="py-3.5 px-4">Dictamen</th>
+                        <th class="py-3.5 px-4">Tipología</th>
+                        <th class="py-3.5 px-4 text-center">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="pqr-table-body" class="divide-y divide-slate-100 text-slate-700">
+                    <tr>
+                        <td colspan="10" class="py-12 text-center text-slate-400">Cargando tus solicitudes PQR...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal: Nueva Solicitud PQR Comercial -->
+<div id="new-pqr-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8 transform transition-all">
+        <div class="px-6 py-4 bg-gradient-to-r from-sky-700 to-indigo-800 text-white flex justify-between items-center">
+            <div class="flex items-center gap-2.5">
+                <div class="p-2 bg-white/10 rounded-lg">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="font-bold text-lg leading-snug">Radicar Solicitud PQR</h3>
+                    <p class="text-xs text-sky-200">Ingresa los datos del punto de venta, cliente y error presentado</p>
+                </div>
+            </div>
+            <button onclick="closeNewPqrModal()" class="text-white/70 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+
+        <form id="new-pqr-form" class="p-6 space-y-4 max-h-[80vh] overflow-y-auto" onsubmit="submitPQR(event)">
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- ID de PDV -->
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                        ID de PDV (Punto de Venta) <span class="text-rose-500">*</span>
+                    </label>
+                    <input type="text" id="pqr-id-pdv" required placeholder="Ej: PDV-1044 / BOG-01"
+                        class="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 outline-none">
+                </div>
+
+                <!-- País -->
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                        País <span class="text-rose-500">*</span>
+                    </label>
+                    <select id="pqr-pais" required class="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 outline-none">
+                        <option value="Colombia">Colombia</option>
+                        <option value="Panamá">Panamá</option>
+                        <option value="Costa Rica">Costa Rica</option>
+                        <option value="México">México</option>
+                        <option value="Guatemala">Guatemala</option>
+                        <option value="Honduras">Honduras</option>
+                        <option value="El Salvador">El Salvador</option>
+                        <option value="Nicaragua">Nicaragua</option>
+                        <option value="Ecuador">Ecuador</option>
+                        <option value="Perú">Perú</option>
+                        <option value="Chile">Chile</option>
+                        <option value="República Dominicana">República Dominicana</option>
+                        <option value="Otro">Otro</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Cliente -->
+            <div class="space-y-2">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Cliente / Razón Social <span class="text-rose-500">*</span>
+                </label>
+                <select id="pqr-cliente-select" required onchange="handleClienteChange()"
+                    class="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 outline-none bg-white font-medium text-slate-800">
+                    <option value="" disabled selected>-- Seleccione cliente / razón social --</option>
+                    <option value="ko tradicional">ko tradicional</option>
+                    <option value="ko moderno">ko moderno</option>
+                    <option value="lindley">lindley</option>
+                    <option value="P&G">P&G</option>
+                    <option value="Heineken">Heineken</option>
+                    <option value="CBC">CBC</option>
+                    <option value="Fifco">Fifco</option>
+                    <option value="ABI">ABI</option>
+                    <option value="Otros">Otros</option>
+                </select>
+
+                <!-- Campo condicional cuando seleccionan "Otros" -->
+                <div id="wrapper-cliente-otro" class="hidden bg-sky-50/70 border border-sky-200 rounded-xl p-3.5 space-y-1.5 transition-all">
+                    <label for="pqr-cliente-otro" class="block text-xs font-bold uppercase tracking-wider text-sky-900">
+                        ¿Cuáles otros? <span class="text-rose-500">*</span>
+                    </label>
+                    <input type="text" id="pqr-cliente-otro" placeholder="Especifique el nombre del cliente / razón social..."
+                        class="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 outline-none bg-white font-medium text-slate-800">
+                    <p class="text-[11px] text-sky-700">Indica cuál es el cliente o razón social correspondiente a la solicitud.</p>
+                </div>
+            </div>
+
+            <!-- Error -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Descripción del Error Presentado <span class="text-rose-500">*</span>
+                </label>
+                <textarea id="pqr-error" rows="4" required 
+                    placeholder="Describe en detalle el error: qué ocurrió, facturas afectadas, montos errados, fecha del suceso y requerimiento del cliente..."
+                    class="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 outline-none"></textarea>
+            </div>
+
+            <!-- Carga de Archivos (Imágenes o Excel) -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Subir Soporte (Imagen o Archivo Excel)
+                </label>
+                <p class="text-xs text-slate-500 mb-2">Admite imágenes (<code class="font-mono text-sky-700">.png, .jpg, .jpeg, .webp</code>) o archivos Excel (<code class="font-mono text-emerald-700">.xlsx, .xls</code>).</p>
+                <input type="file" id="pqr-archivo" accept=".png,.jpg,.jpeg,.webp,.xlsx,.xls"
+                    class="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 cursor-pointer">
+            </div>
+
+            <div class="pt-4 border-t border-slate-200 flex justify-end gap-3">
+                <button type="button" onclick="closeNewPqrModal()" class="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+                    Cancelar
+                </button>
+                <button type="submit" id="btn-submit-pqr" class="px-5 py-2 text-sm font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-lg shadow-md shadow-sky-600/20 transition-all">
+                    Radicar Solicitud
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Ver Detalle y Resolución -->
+<div id="detail-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8">
+        <div class="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+            <div>
+                <span id="detail-consecutivo" class="text-xs font-bold uppercase tracking-wider bg-white/20 px-2.5 py-0.5 rounded-full text-white"></span>
+                <h3 class="font-bold text-lg mt-1" id="detail-modal-title">Detalle de la Solicitud PQR</h3>
+            </div>
+            <button onclick="closeDetailModal()" class="text-white/70 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+
+        <div class="p-6 space-y-5 max-h-[80vh] overflow-y-auto text-xs sm:text-sm">
+            
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl text-xs border border-slate-200">
+                <div>
+                    <span class="text-slate-400 block uppercase font-bold text-[10px]">ID PDV</span>
+                    <span id="detail-id-pdv" class="font-bold text-slate-800 text-sm"></span>
+                </div>
+                <div>
+                    <span class="text-slate-400 block uppercase font-bold text-[10px]">Cliente</span>
+                    <span id="detail-cliente" class="font-bold text-slate-800"></span>
+                </div>
+                <div>
+                    <span class="text-slate-400 block uppercase font-bold text-[10px]">País</span>
+                    <span id="detail-pais" class="font-semibold text-slate-700"></span>
+                </div>
+                <div>
+                    <span class="text-slate-400 block uppercase font-bold text-[10px]">Fecha Radicado</span>
+                    <span id="detail-fecha" class="font-medium text-slate-700"></span>
+                </div>
+            </div>
+
+            <div>
+                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Error Reportado por Comercial:</h4>
+                <div id="detail-error" class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-slate-800 whitespace-pre-line text-xs sm:text-sm"></div>
+            </div>
+
+            <!-- Soporte Adjunto -->
+            <div id="detail-adjunto-section"></div>
+
+            <!-- Respuesta del Validador -->
+            <div class="border-t border-slate-200 pt-4">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-900 mb-3 flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Dictamen y Resolución del Validador
+                </h4>
+                <div id="resolution-content"></div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-200 flex justify-end">
+                <button onclick="closeDetailModal()" class="px-5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-900 text-white rounded-lg">
+                    Cerrar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const currentEmail = "{{ email }}";
+    let myPqrs = [];
+
+    document.getElementById('nav-comercial').classList.add('bg-sky-50', 'text-sky-700', 'font-semibold');
+    document.getElementById('user-initial').innerText = currentEmail.charAt(0).toUpperCase();
+
+    async function loadRequests() {
+        try {
+            const res = await fetch(`/api/pqr/mis-solicitudes?email=${encodeURIComponent(currentEmail)}`);
+            myPqrs = await res.json();
+            renderTable(myPqrs);
+        } catch (err) {
+            console.error(err);
+            showToast('Error cargando solicitudes', 'error');
+        }
+    }
+
+    function renderTable(list) {
+        const tbody = document.getElementById('pqr-table-body');
+        document.getElementById('requests-count').innerText = `${list.length} solicitudes`;
+
+        if (!list || list.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="10" class="py-12 text-center text-slate-400">
+                        <p class="font-medium text-slate-500">No tienes solicitudes registradas con tu correo.</p>
+                        <p class="text-xs mt-1">Haz clic en "Nueva Solicitud PQR" para radicar tu primer reporte.</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = list.map(p => {
+            let estadoBadge = '';
+            if (p.estado === 'Pendiente') estadoBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Pendiente</span>';
+            else if (p.estado === 'En Revisión') estadoBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800">En Revisión</span>';
+            else if (p.estado === 'Resuelto') estadoBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Resuelto</span>';
+            else estadoBadge = `<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">${p.estado}</span>`;
+
+            let aplicaBadge = '';
+            if (!p.aplica) aplicaBadge = '<span class="text-slate-400 italic text-xs">Por dictaminar</span>';
+            else if (p.aplica === 'Aplica') aplicaBadge = '<span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">✓ Aplica</span>';
+            else if (p.aplica === 'No Aplica') aplicaBadge = '<span class="px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">✗ No Aplica</span>';
+            else aplicaBadge = `<span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">${p.aplica}</span>`;
+
+            // Adjunto link
+            let adjuntoHtml = '<span class="text-slate-300">-</span>';
+            if (p.adjunto_ruta) {
+                const isImg = p.adjunto_nombre && /\.(png|jpg|jpeg|webp)$/i.test(p.adjunto_nombre);
+                adjuntoHtml = `
+                    <a href="${p.adjunto_ruta}" target="_blank" class="inline-flex items-center gap-1 text-[11px] font-semibold ${isImg ? 'text-sky-600 bg-sky-50' : 'text-emerald-700 bg-emerald-50'} px-2 py-0.5 rounded border">
+                        ${isImg ? '🖼️ Imagen' : '📊 Excel'}
+                    </a>
+                `;
+            }
+
+            return `
+                <tr class="hover:bg-slate-50/80 transition-colors">
+                    <td class="py-3 px-4 font-mono font-bold text-sky-700">${p.consecutivo}</td>
+                    <td class="py-3 px-4 font-mono text-xs font-semibold text-slate-800">${p.id_pdv}</td>
+                    <td class="py-3 px-4 font-semibold text-slate-800">${p.cliente}</td>
+                    <td class="py-3 px-4 text-xs font-medium text-slate-600">${p.pais}</td>
+                    <td class="py-3 px-4 text-xs text-slate-600 max-w-xs truncate" title="${p.error}">
+                        ${p.error}
+                    </td>
+                    <td class="py-3 px-4 text-center">${adjuntoHtml}</td>
+                    <td class="py-3 px-4">${estadoBadge}</td>
+                    <td class="py-3 px-4">${aplicaBadge}</td>
+                    <td class="py-3 px-4 text-xs text-slate-600 max-w-[140px] truncate" title="${p.tipologia || 'Sin asignar'}">
+                        ${p.tipologia ? `<span class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100 text-[11px] font-medium">${p.tipologia}</span>` : '<span class="text-slate-400 italic">Pendiente</span>'}
+                    </td>
+                    <td class="py-3 px-4 text-center whitespace-nowrap">
+                        <button onclick="viewDetail(${p.id})" class="px-3 py-1 bg-slate-100 hover:bg-sky-50 text-slate-700 hover:text-sky-700 rounded-lg text-xs font-semibold transition-colors border border-slate-200">
+                            Ver Detalle
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function filterRequests() {
+        const query = document.getElementById('search-input').value.toLowerCase();
+        const status = document.getElementById('status-filter').value;
+
+        const filtered = myPqrs.filter(p => {
+            const matchesQuery = !query || 
+                p.consecutivo.toLowerCase().includes(query) ||
+                p.id_pdv.toLowerCase().includes(query) ||
+                p.cliente.toLowerCase().includes(query) ||
+                p.pais.toLowerCase().includes(query) ||
+                p.error.toLowerCase().includes(query);
+            
+            const matchesStatus = status === 'Todos' || p.estado === status;
+            return matchesQuery && matchesStatus;
+        });
+
+        renderTable(filtered);
+    }
+
+    function handleClienteChange() {
+        const sel = document.getElementById('pqr-cliente-select');
+        const wrapper = document.getElementById('wrapper-cliente-otro');
+        const inputOtro = document.getElementById('pqr-cliente-otro');
+
+        if (sel.value === 'Otros') {
+            wrapper.classList.remove('hidden');
+            inputOtro.required = true;
+            setTimeout(() => inputOtro.focus(), 60);
+        } else {
+            wrapper.classList.add('hidden');
+            inputOtro.required = false;
+            inputOtro.value = '';
+        }
+    }
+
+    function openNewPqrModal() {
+        document.getElementById('new-pqr-modal').classList.remove('hidden');
+    }
+    function closeNewPqrModal() {
+        document.getElementById('new-pqr-modal').classList.add('hidden');
+        document.getElementById('new-pqr-form').reset();
+        handleClienteChange();
+    }
+
+    async function submitPQR(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btn-submit-pqr');
+
+        const selCliente = document.getElementById('pqr-cliente-select').value;
+        if (!selCliente) {
+            showToast('Por favor seleccione un cliente de la lista.', 'error');
+            return;
+        }
+
+        let clienteFinal = selCliente;
+        if (selCliente === 'Otros') {
+            const cualOtro = document.getElementById('pqr-cliente-otro').value.trim();
+            if (!cualOtro) {
+                showToast('Por favor especifique cuáles otros en el campo de cliente.', 'error');
+                document.getElementById('pqr-cliente-otro').focus();
+                return;
+            }
+            clienteFinal = `Otros: ${cualOtro}`;
+        }
+
+        btn.disabled = true;
+        btn.innerText = 'Subiendo y Radicando...';
+
+        const formData = new FormData();
+        formData.append('comercial_email', currentEmail);
+        formData.append('id_pdv', document.getElementById('pqr-id-pdv').value);
+        formData.append('cliente', clienteFinal);
+        formData.append('pais', document.getElementById('pqr-pais').value);
+        formData.append('error', document.getElementById('pqr-error').value);
+
+        const fileInput = document.getElementById('pqr-archivo');
+        if (fileInput.files.length > 0) {
+            formData.append('archivo', fileInput.files[0]);
+        }
+
+        try {
+            const res = await fetch('/api/pqr', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) throw new Error('Error al radicar');
+            const created = await res.json();
+            showToast(`¡Solicitud ${created.consecutivo} radicada con éxito!`, 'success');
+            closeNewPqrModal();
+            loadRequests();
+        } catch (err) {
+            console.error(err);
+            showToast('No se pudo radicar la solicitud.', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Radicar Solicitud';
+        }
+    }
+
+    function viewDetail(pqrId) {
+        const p = myPqrs.find(item => item.id === pqrId);
+        if (!p) return;
+
+        document.getElementById('detail-consecutivo').innerText = p.consecutivo;
+        document.getElementById('detail-id-pdv').innerText = p.id_pdv;
+        document.getElementById('detail-cliente').innerText = p.cliente;
+        document.getElementById('detail-pais').innerText = p.pais;
+        document.getElementById('detail-fecha').innerText = p.fecha_creacion;
+        document.getElementById('detail-error').innerText = p.error;
+
+        // Adjunto render
+        const adjSection = document.getElementById('detail-adjunto-section');
+        if (p.adjunto_ruta) {
+            const isImg = p.adjunto_nombre && /\.(png|jpg|jpeg|webp)$/i.test(p.adjunto_nombre);
+            adjSection.innerHTML = `
+                <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Archivo de Soporte Adjunto:</span>
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-medium text-slate-700 truncate max-w-sm">${p.adjunto_nombre}</span>
+                        <a href="${p.adjunto_ruta}" target="_blank" class="px-3 py-1 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors">
+                            Descargar / Ver
+                        </a>
+                    </div>
+                    ${isImg ? `<div class="mt-2.5 max-h-48 overflow-hidden rounded-lg border border-slate-200"><img src="${p.adjunto_ruta}" class="w-full h-auto object-contain"></div>` : ''}
+                </div>
+            `;
+        } else {
+            adjSection.innerHTML = '<span class="text-xs text-slate-400 italic">Sin archivo adjunto</span>';
+        }
+
+        // Resolución
+        const resDiv = document.getElementById('resolution-content');
+        if (p.estado === 'Pendiente') {
+            resDiv.innerHTML = `
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-xs sm:text-sm">
+                    <p class="font-bold">Solicitud en espera de validación</p>
+                    <p class="text-xs text-amber-700 mt-0.5">El validador revisará el error y dictaminará si aplica o no aplica.</p>
+                </div>
+            `;
+        } else {
+            let apl = p.aplica === 'Aplica' ? '<span class="px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">✓ Aplica</span>' :
+                     (p.aplica === 'No Aplica' ? '<span class="px-2.5 py-0.5 rounded text-xs font-bold bg-rose-100 text-rose-800">✗ No Aplica</span>' : `<span class="px-2.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800">${p.aplica}</span>`);
+
+            resDiv.innerHTML = `
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block">Dictamen</span>
+                            ${apl}
+                        </div>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block">Tipología</span>
+                            <span class="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 block mt-0.5 truncate" title="${p.tipologia || 'N/A'}">${p.tipologia || 'N/A'}</span>
+                        </div>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block">Área Adjudicable</span>
+                            <span class="text-xs font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-300 block mt-0.5">${p.adjudicable || 'Sin asignar'}</span>
+                        </div>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block">Fecha Resolución</span>
+                            <span class="text-xs font-mono font-medium text-slate-700 block mt-0.5">${p.fecha_resolucion || 'Pendiente'}</span>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-t border-slate-200">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Respuesta del Validador:</span>
+                        <div class="text-xs sm:text-sm bg-white p-3 rounded-lg border border-slate-200 text-slate-800 whitespace-pre-line">${p.respuesta_validador || 'Sin respuesta'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        document.getElementById('detail-modal').classList.remove('hidden');
+    }
+    function closeDetailModal() {
+        document.getElementById('detail-modal').classList.add('hidden');
+    }
+
+    window.addEventListener('DOMContentLoaded', loadRequests);
+</script>
+{% endblock %}

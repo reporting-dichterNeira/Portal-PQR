@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block title %}Iniciar Sesión - Portal PQR{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto py-4">
+    <div class="text-center mb-8">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 mb-3">
+            <span class="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
+            Plataforma Corporativa de PQRs
+        </span>
+        <h1 class="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">Acceso Seguro al Portal</h1>
+        <p class="mt-2 text-sm sm:text-base text-slate-600 max-w-xl mx-auto">
+            Ingresa con tu correo corporativo y contraseña para acceder a las funciones correspondientes a tu rol.
+        </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        <!-- Formulario de Login Principal -->
+        <div class="lg:col-span-6 bg-white rounded-2xl p-7 shadow-sm border border-slate-200">
+            <h2 class="text-xl font-bold text-slate-900 mb-1">Iniciar Sesión</h2>
+            <p class="text-xs text-slate-500 mb-6">El sistema te redirigirá automáticamente a tu panel según tu perfil.</p>
+
+            <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
+                <div>
+                    <label for="login-email" class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                        Correo Electrónico
+                    </label>
+                    <div class="relative">
+                        <input type="email" id="login-email" required
+                            placeholder="usuario@empresa.com"
+                            class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm transition-all outline-none pl-10" />
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.206"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="login-password" class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                        Contraseña
+                    </label>
+                    <div class="relative">
+                        <input type="password" id="login-password" required
+                            placeholder="••••••••"
+                            class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm transition-all outline-none pl-10" />
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" id="btn-login" class="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2">
+                        <span>Ingresar al Sistema</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tarjeta de Perfiles de Prueba Rápida -->
+        <div class="lg:col-span-6 space-y-3">
+            <div class="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-2xl p-6 text-white shadow-md">
+                <h3 class="font-bold text-base text-white flex items-center gap-2">
+                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    Credenciales de Prueba Rápida (1 Clic)
+                </h3>
+                <p class="text-xs text-slate-300 mt-1 mb-4">
+                    Haz clic en cualquiera de las siguientes opciones para rellenar los datos de acceso al instante:
+                </p>
+
+                <div class="space-y-2.5">
+                    <!-- Botón Admin -->
+                    <button type="button" onclick="fillAndLogin('admin@empresa.com', 'Admin123*')" 
+                        class="w-full text-left bg-white/10 hover:bg-white/20 p-3 rounded-xl transition-all border border-white/10 flex items-center justify-between group">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500 text-white uppercase">Admin</span>
+                                <span class="text-xs font-semibold text-white">admin@empresa.com</span>
+                            </div>
+                            <span class="text-[11px] text-slate-300 block mt-0.5">Gestión de usuarios y tipologías exclusivas</span>
+                        </div>
+                        <span class="text-xs text-indigo-300 group-hover:translate-x-1 transition-transform">→</span>
+                    </button>
+
+                    <!-- Botón Validador -->
+                    <button type="button" onclick="fillAndLogin('validador@empresa.com', 'Validador123*')" 
+                        class="w-full text-left bg-white/10 hover:bg-white/20 p-3 rounded-xl transition-all border border-white/10 flex items-center justify-between group">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500 text-white uppercase">Validador</span>
+                                <span class="text-xs font-semibold text-white">validador@empresa.com</span>
+                            </div>
+                            <span class="text-[11px] text-slate-300 block mt-0.5">Dictaminar Aplica/No Aplica, tipologías y resolver</span>
+                        </div>
+                        <span class="text-xs text-indigo-300 group-hover:translate-x-1 transition-transform">→</span>
+                    </button>
+
+                    <!-- Botón Comercial 1 -->
+                    <button type="button" onclick="fillAndLogin('carlos.mendoza@empresa.com', 'Carlos123*')" 
+                        class="w-full text-left bg-white/10 hover:bg-white/20 p-3 rounded-xl transition-all border border-white/10 flex items-center justify-between group">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500 text-white uppercase">Comercial</span>
+                                <span class="text-xs font-semibold text-white">carlos.mendoza@empresa.com</span>
+                            </div>
+                            <span class="text-[11px] text-slate-300 block mt-0.5">Radicar PQRs (ID PDV, Cliente, País, Error, Adjuntos)</span>
+                        </div>
+                        <span class="text-xs text-indigo-300 group-hover:translate-x-1 transition-transform">→</span>
+                    </button>
+
+                    <!-- Botón Redigitador -->
+                    <button type="button" onclick="fillAndLogin('redigitador@empresa.com', 'Redigitador123*')" 
+                        class="w-full text-left bg-white/10 hover:bg-white/20 p-3 rounded-xl transition-all border border-white/10 flex items-center justify-between group">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-white uppercase">Redigitador</span>
+                                <span class="text-xs font-semibold text-white">redigitador@empresa.com</span>
+                            </div>
+                            <span class="text-[11px] text-slate-300 block mt-0.5">Bandeja de redigitación y asignación de nuevo N° auditoría</span>
+                        </div>
+                        <span class="text-xs text-indigo-300 group-hover:translate-x-1 transition-transform">→</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-800 flex items-start gap-2.5">
+                <svg class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div>
+                    <span class="font-bold">Contraseñas encriptadas con PBKDF2</span>
+                    <p class="text-amber-700 mt-0.5">Todas las contraseñas se almacenan con salt criptográfico individual y 100.000 iteraciones de SHA-256 en la base de datos local.</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function fillAndLogin(email, password) {
+        document.getElementById('login-email').value = email;
+        document.getElementById('login-password').value = password;
+        document.getElementById('login-form').dispatchEvent(new Event('submit'));
+    }
+
+    async function handleLogin(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btn-login');
+        btn.disabled = true;
+        btn.innerText = 'Verificando...';
+
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Credenciales inválidas');
+            }
+
+            const user = await res.json();
+            localStorage.setItem('pqr_user', JSON.stringify(user));
+            showToast(`¡Bienvenido/a, ${user.nombre}!`, 'success');
+
+            // Redirección según rol
+            setTimeout(() => {
+                if (user.rol === 'admin') window.location.href = '/admin';
+                else if (user.rol === 'validador') window.location.href = '/validador';
+                else if (user.rol === 'redigitador') window.location.href = '/redigitacion';
+                else window.location.href = `/comercial?email=${encodeURIComponent(user.email)}`;
+            }, 500);
+
+        } catch (err) {
+            console.error(err);
+            showToast(err.message || 'Error al iniciar sesión', 'error');
+            btn.disabled = false;
+            btn.innerText = 'Ingresar al Sistema';
+        }
+    }
+</script>
+{% endblock %}
