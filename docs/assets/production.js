@@ -155,6 +155,13 @@
   }
   function admin() {
     $('#view').innerHTML = `${header('Administración', 'Gestiona cuentas, responsables, tipologías y registros.', '<button class="secondary" data-action="new-user">Nuevo usuario</button>')}<section class="metrics">${metric('PQR radicadas', state.tickets.length)}${metric('Abiertas', state.tickets.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', state.tickets.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section><section class="grid2 staff-grid">${staffCard('validador', 'Analistas de PQR')}${staffCard('redigitador', 'Redigitadores')}</section>${ticketTable(state.tickets, 'admin')}${state.deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${state.deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · PDV ${esc(ticket.pdv)} · ${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}<section class="grid2"><article class="card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Sin correos personales ni compartidos.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></article><article class="card"><h3>Tipologías</h3><div class="list">${state.tips.map(tip => `<div class="list-item">${esc(tip)}<button class="ghost right" data-action="delete-tip" data-tip="${esc(tip)}">Eliminar</button></div>`).join('')}</div><form id="tip-form" class="actions"><input name="name" placeholder="Nueva tipología" required><button class="secondary">Agregar</button></form></article></section>`;
+    const accounts = [...$('#view').querySelectorAll('article')].find(card => card.querySelector('h3')?.textContent === 'Cuentas de acceso');
+    accounts?.querySelectorAll('tbody tr').forEach((row, index) => {
+      const person = state.users[index];
+      const cell = row.lastElementChild;
+      cell.classList.add('account-controls');
+      cell.insertAdjacentHTML('afterbegin', `<button class="secondary" data-action="credentials" data-id="${esc(person.id)}">Credenciales</button>`);
+    });
     $('#tip-form').onsubmit = async event => { event.preventDefault(); await submit(event.currentTarget, async () => { const { error } = await db.rpc('pqr_admin_tip', { p_name: formData(event.currentTarget).name, p_delete: false }); if (error) throw error; }); };
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
@@ -211,6 +218,22 @@
       else { if (values.username.trim().toLowerCase() !== person.username) await adminFunction({ action: 'rename', id: person.id, username: values.username }); if (values.password) await adminFunction({ action: 'set_password', id: person.id, password: values.password }); }
     }); };
   }
+  function credentials(person, temporaryPassword = '') {
+    if (!person) return;
+    const username = temporaryPassword ? temporaryPassword.username : person.username;
+    modal(`Credenciales · @${username}`, `<div class="stack"><div class="credential-copy"><label>Usuario<input id="credential-username" value="${esc(username)}" readonly autocomplete="off"></label><button class="secondary" data-action="copy-username">Copiar usuario</button></div>${temporaryPassword ? `<div class="credential-copy"><label>Nueva contraseña temporal<input id="credential-password" value="${esc(temporaryPassword.password)}" readonly autocomplete="off" spellcheck="false"></label><button class="secondary" data-action="copy-temp-password">Copiar contraseña</button></div><p class="notice">Copia y entrega esta contraseña ahora. Al cerrar esta ventana no podrás volver a verla; si se pierde, tendrás que generar otra.</p>` : `<p class="notice">Por seguridad, no es posible consultar la contraseña actual. Si se olvidó, puedes reemplazarla por una nueva contraseña temporal.</p><div class="actions"><button class="primary" data-action="reset-credential" data-id="${esc(person.id)}">Generar nueva contraseña</button></div>`}</div>`);
+  }
+  async function copyCredential(inputId, button) {
+    const input = $(inputId);
+    if (!input) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+    } catch {
+      input.focus(); input.select();
+      if (!document.execCommand('copy')) throw new Error('No se pudo copiar automáticamente. Selecciona el campo y cópialo manualmente.');
+    }
+    button.textContent = 'Copiado';
+  }
   function passwordForm() {
     modal('Cambiar mi contraseña', '<form id="action-form" class="stack"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="12" required></label><div class="actions"><button class="primary">Guardar contraseña</button></div></form>');
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.auth.updateUser({ password: formData(form).password }); if (error) throw error; }); };
@@ -241,6 +264,19 @@
       if (type === 'restore' && ticket) { await action('restore', ticket.id); await load(); return; }
       if (type === 'new-user') return userForm(null);
       if (type === 'manager-view' && state.me.role === 'gerente') { managerState.view = button.dataset.managerView; dashboard(); return; }
+      if (type === 'credentials' && state.me.role === 'admin') return credentials(state.users.find(person => person.id === button.dataset.id));
+      if (type === 'copy-username' && state.me.role === 'admin') return await copyCredential('#credential-username', button);
+      if (type === 'copy-temp-password' && state.me.role === 'admin') return await copyCredential('#credential-password', button);
+      if (type === 'reset-credential' && state.me.role === 'admin') {
+        const person = state.users.find(item => item.id === button.dataset.id);
+        if (!person || !confirm(`Se reemplazará la contraseña actual de @${person.username}. ¿Quieres continuar?`)) return;
+        button.disabled = true;
+        try {
+          const result = await adminFunction({ action: 'reset_password', id: person.id });
+          credentials(person, result);
+        } finally { button.disabled = false; }
+        return;
+      }
       if (type === 'edit-user') return userForm(state.users.find(person => person.id === button.dataset.id));
       if (type === 'staff') return staffForm(button.dataset.role, [...state.staff.validators, ...state.staff.redigitators].find(person => person.id === button.dataset.person));
       if (type === 'toggle-staff') { const person = [...state.staff.validators, ...state.staff.redigitators].find(item => item.id === button.dataset.person); const { error } = await db.rpc('pqr_admin_staff', { p_id: person.id, p_role: person.role, p_name: person.name, p_active: !person.active }); if (error) throw error; await load(); return; }

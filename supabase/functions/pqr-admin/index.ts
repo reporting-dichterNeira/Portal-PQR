@@ -19,6 +19,7 @@ function reply(origin: string, body: object, status = 200) {
       'access-control-allow-origin': origin,
       'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info',
       'access-control-allow-methods': 'POST, OPTIONS',
+      'cache-control': 'no-store',
       vary: 'Origin',
     },
   });
@@ -98,6 +99,14 @@ Deno.serve(async (request) => {
     if (password.length < 12) return reply(origin, { error: 'La contraseña debe tener 12 caracteres o más' }, 400);
     const { error } = await admin.auth.admin.updateUserById(targetId, { password });
     return reply(origin, error ? { error: error.message } : { ok: true }, error ? 400 : 200);
+  }
+  if (action === 'reset_password') {
+    const random = crypto.getRandomValues(new Uint8Array(24));
+    const temporaryPassword = btoa(String.fromCharCode(...random))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') + '!Aa9';
+    const { error } = await admin.auth.admin.updateUserById(targetId, { password: temporaryPassword });
+    if (error) return reply(origin, { error: error.message }, 400);
+    return reply(origin, { username: target.username, password: temporaryPassword });
   }
   return reply(origin, { error: 'Acción desconocida' }, 400);
 });
