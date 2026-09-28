@@ -33,7 +33,15 @@ Deno.serve(async (request) => {
   if (!token) return reply(origin, { error: 'Sesión requerida' }, 401);
   const { data: identity, error: authError } = await admin.auth.getUser(token);
   if (authError || !identity.user) return reply(origin, { error: 'Sesión inválida' }, 401);
-  const { data: actor } = await admin.from('pqr_profiles').select('role, active').eq('id', identity.user.id).single();
+  const publicKey = request.headers.get('apikey') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  if (!publicKey) return reply(origin, { error: 'Clave pública requerida' }, 400);
+  const userClient = createClient(url, publicKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data: actor, error: profileError } = await userClient.from('pqr_profiles')
+    .select('role, active').eq('id', identity.user.id).single();
+  if (profileError) console.error('Profile lookup:', profileError.message);
   if (actor?.role !== 'admin' || actor?.active !== true) return reply(origin, { error: 'Solo Administración' }, 403);
 
   let input: Record<string, unknown>;
