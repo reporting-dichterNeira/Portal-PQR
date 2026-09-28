@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+pqr.db
+output/
+outputs/
+tmp/
+docs/assets/app.js
+docs/assets/demo.js

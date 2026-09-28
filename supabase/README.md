@@ -1,11 +1,7 @@
-# Migración futura a Supabase
+# Supabase · Portal PQR
 
-La versión de GitHub Pages usa un adaptador local en `docs/assets/app.js`. Las vistas consumen un único objeto `Store`; para migrar, se reemplazan sus métodos por llamadas a Supabase sin modificar las pantallas ni los estados del flujo.
+Proyecto: `niwkegxwwwoahcbsoujy` en la organización Free «Planeacion». La migración `migrations/20260928_portal_pqr.sql` fue aplicada en este proyecto. La función `functions/pqr-admin/index.ts` fue desplegada con verificación moderna de Auth (`getUser` más perfil administrador); la verificación heredada del gateway está desactivada para esta función. El registro público de usuarios en Auth está desactivado.
 
-Antes de conectar producción:
+La clave `SUPABASE_SERVICE_ROLE_KEY` solo se lee desde el entorno de la función. Nunca debe copiarse al frontend ni a GitHub. Las cuentas se crean desde Administración y reciben un nombre de usuario; Supabase Auth utiliza un identificador técnico `usuario@portal-pqr.invalid` que no se muestra al usuario. Las políticas RLS restringen los casos de Comercial al propio titular y reservan la administración para `admin`.
 
-1. Crear autenticación real con Supabase Auth; nunca trasladar las contraseñas de prueba al proyecto remoto.
-2. Modelar perfiles, PQR, eventos de línea de tiempo, notificaciones y adjuntos.
-3. Activar RLS en todas las tablas expuestas y limitar los comerciales a sus propios casos.
-4. Guardar adjuntos en Supabase Storage con políticas por PQR, no en `localStorage`.
-5. Mantener GitHub Pages como frontend: se configura la URL y la publishable key de Supabase, nunca una `service_role`.
+No se importaron los datos de prueba del piloto. La base oficial comenzó con una sola cuenta, `admin`, y sin tickets.

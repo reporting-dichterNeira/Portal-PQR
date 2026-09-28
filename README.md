@@ -1,86 +1,28 @@
-﻿# Portal de Solicitudes PQR (Comercial, Validador y Administrador)
+# Portal PQR · dichter & neira
 
-## Piloto desplegable en GitHub Pages
+Portal de gestión de PQR publicado en GitHub Pages y conectado al proyecto **Portal PQR** de Supabase (organización Free «Planeacion»). El acceso es con nombre de usuario y contraseña; Supabase usa un identificador técnico interno que no aparece en la interfaz.
 
-La carpeta [`docs/`](docs/) contiene la versión estática para pruebas, compatible con GitHub Pages. Conserva el flujo de PQR completo en el navegador y almacena los datos de prueba en `localStorage`; por ello no requiere Python, servidor, base de datos ni credenciales de producción.
+## Acceso
 
-Tras habilitar GitHub Pages con **GitHub Actions**, el sitio estará en:
+Sitio: https://reporting-dichterneira.github.io/Portal-PQR/
 
-`https://reporting-dichterneira.github.io/Portal-PQR/`
+Al iniciar, solo existe la cuenta `admin`. Administración crea las cuentas de Comercial, Analistas de PQR, Redigitación y Gerencia, además de mantener las listas de personas responsables y las tipologías. El registro público está desactivado. Las cuentas compartidas de Analistas de PQR y Redigitación son únicas por área; dentro de cada ticket se selecciona quién gestionó el caso.
 
-> Este enlace será el frontend permanente. En la siguiente fase se conectará Supabase desde ese mismo sitio; consulta [`supabase/README.md`](supabase/README.md). No ingreses datos reales ni sensibles durante el piloto.
+## Flujo
 
----
+Comercial radica → Analistas de PQR asignan y dictaminan → cierre justificado, cierre con respuesta o redigitación → Redigitación registra nueva auditoría → Analistas verifican → cierre y notificación interna al comercial. Comercial también puede solicitar redigitación directa. El panel de Gerencia incluye indicadores, filtros por país y estudio, y exportaciones PDF/Excel. Administración puede retirar un ticket individualmente y restaurarlo.
 
-Plataforma corporativa integral para la radicación, dictamen, control de calidad y análisis de SLA de PQRs desarrollada con **FastAPI**, **SQLite**, **Tailwind CSS** y **openpyxl**.
+Los ID de PDV y auditoría se validan como dígitos. La trazabilidad de cada etapa y su hora quedan en el detalle del ticket y en columnas del Excel. Las bandejas operativas muestran el plazo SLA de 24 horas.
 
-## Flujo operativo
+## Arquitectura y despliegue
 
-`Radicado → En validación → Pendiente de redigitación → Pendiente de verificación → Cerrado`
+- `docs/`: frontend estático servido por GitHub Pages.
+- `supabase/migrations/20260928_portal_pqr.sql`: tablas, políticas RLS y funciones de flujo instaladas en Supabase.
+- `supabase/functions/pqr-admin/index.ts`: función de administración de usuarios. La clave privada permanece en Supabase; el frontend contiene únicamente la clave publicable.
+- `docs/assets/production.js`: cliente oficial de Supabase.
 
-- El comercial radica y consulta únicamente sus propios casos.
-- El validador se asigna el caso, emite el dictamen y, cuando aplica, lo envía a redigitación.
-- El redigitador registra un número de auditoría único; el caso vuelve al validador para verificación final.
-- El validador aprueba el cierre o devuelve la redigitación con observaciones. Cada paso queda en la línea de tiempo y genera una alerta interna.
+Para revisar localmente: `python -m http.server 8765 --directory docs` y abrir http://localhost:8765/. No se importaron tickets ni cuentas de prueba del piloto local. Los datos antiguos de SQLite y del navegador permanecen en el entorno local, separados de la nueva base oficial.
 
-La plataforma controla el acceso por rol (administrador, validador, redigitador y comercial), valida adjuntos permitidos de hasta 10 MB, previene duplicados recientes y expone indicadores de SLA por etapa y una cola de escalaciones.
+Limitación actual: los archivos adjuntos aún no están habilitados en el portal oficial; el formulario lo indica. Las notificaciones son internas al portal, no correo electrónico.
 
----
-
-## 🚀 Acceso al Sistema
-
-El portal se encuentra activo en tu entorno local:
-👉 **[http://localhost:8000](http://localhost:8000)**
-
-### 🔑 Credenciales Iniciales de Acceso
-
-| Perfil | Correo | Contraseña | Rol / Permisos |
-|---|---|---|---|
-| **👑 Administrador** | `admin@empresa.com` | `Admin123*` | Gestión de usuarios, asignación de roles/claves y administración exclusiva del catálogo de tipologías. |
-| **🛡️ Validador Principal** | `validador@empresa.com` | `Validador123*` | Revisión, dictamen (*Aplica / No Aplica*), selección de tipología establecida, respuesta y sellado de fecha. |
-| **🛡️ Validador 2** | `maria.validadora@empresa.com` | `Maria123*` | Gestión y resolución de casos asignados. |
-| **💼 Comercial 1** | `carlos.mendoza@empresa.com` | `Carlos123*` | Radicación con ID PDV, Cliente, País, Error y Adjuntos (Imágenes/Excel). Seguimiento a sus casos. |
-| **💼 Comercial 2** | `laura.gomez@empresa.com` | `Laura123*` | Radicación y consulta de solicitudes comerciales. |
-
----
-
-## 📊 Hoja de Estadísticas y Rendimiento de Validadores (SLA)
-
-Dentro del panel del validador (`http://localhost:8000/validador`), ahora cuentas con dos pestañas de navegación:
-
-1. **Bandeja de Gestión de Casos:**
-   - Tabla de tickets con filtros por estado y dictamen.
-   - Modal de dictamen oficial: ¿Aplica o No?, Tipología establecida, justificación y sellado automático de fecha.
-2. **Estadísticas y Rendimiento de Validadores (SLA):**
-   - **Métricas Globales de SLA:**
-     * Tiempo Promedio Global de Resolución (horas).
-     * Tasa de Cumplimiento de SLA (meta ≤ 24 horas).
-     * Total de Tickets Dictaminados.
-     * Tasa de Procedencia (% Aplica vs % No Aplica).
-   - **Desglose Individual por Usuario Validador:**
-     * Nombre y Correo del Validador.
-     * Total de Tickets Resueltos.
-     * Casos que Aplican (cantidad y porcentaje).
-     * Casos que No Aplican (cantidad y porcentaje).
-     * Casos que Aplican Parcialmente.
-     * Tiempo Promedio de Resolución (SLA) individual.
-     * Barra de progreso de cumplimiento de meta SLA (verde/amarilla/roja).
-   - **Distribución por Tipología:** Volumen de casos y tasa de aprobación por cada categoría.
-   - **Distribución Geográfica:** Casos radicados y tasa de aprobación por País.
-   - **Exportación a Excel Multihas:** Al pulsar "Descargar Excel con Hoja SLA", se genera un archivo `.xlsx` con dos hojas formateadas:
-     1. `Casos PQRs Detallados`
-     2. `Estadísticas Validadores & SLA`
-
----
-
-## 👑 Panel Administrativo (`/admin`)
-
-- **Gestión Integral de Usuarios:** Creación, edición, activación/inactivación y reseteo de claves de comerciales y validadores.
-- **Catálogo Exclusivo de Tipologías:** Control centralizado de las tipologías oficiales de la empresa.
-
----
-
-## 💼 Módulo Comercial (`/comercial`)
-
-- Formulario estructurado con: **ID de PDV**, **Cliente**, **País**, **Error** y **Carga de Archivos** (Imágenes `.png, .jpg, .jpeg, .webp` o archivos Excel `.xlsx, .xls`).
-- Seguimiento en tiempo real con visor de estado, dictamen y respuesta del validador.
+La implementación anterior con FastAPI/SQLite sigue en el repositorio como referencia histórica; GitHub Pages sirve únicamente `docs/`.
