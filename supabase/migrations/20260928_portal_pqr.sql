@@ -137,7 +137,7 @@ begin
     end if;
     v_data := public.pqr_event(v_data,v_actor.name,
       case when p_action='direct_create' then 'Redigitación directa solicitada' else 'PQR radicada' end,
-      case when p_action='direct_create' then 'Auditoría actual: ' || p_data->>'auditOriginal' else 'Caso creado por el comercial.' end);
+      case when p_action='direct_create' then 'Auditoría actual: ' || (p_data->>'auditOriginal') else 'Caso creado por el comercial.' end);
     insert into public.pqr_tickets(id,code,commercial_id,status,created_at,updated_at,data)
     values(v_id,v_code,v_actor.id,v_result,v_now,v_now,v_data);
     if v_account is not null then perform public.pqr_notice(v_account,v_id,'Redigitación directa',v_code || ' requiere redigitación'); end if;
@@ -171,13 +171,13 @@ begin
       select id into v_account from public.pqr_profiles where role='redigitador' and active=true limit 1;
       if v_account is null then raise exception 'No hay cuenta de Redigitación activa'; end if;
       v_data := v_data || jsonb_build_object('status','Pendiente de Redigitación','redigitador',v_account::text,'redigitRequestedAt',v_now);
-      v_data := public.pqr_event(v_data,v_actor.name,'Aplica: requiere redigitación','ID de auditoría: ' || v_audit || '. ' || p_data->>'response');
+      v_data := public.pqr_event(v_data,v_actor.name,'Aplica: requiere redigitación','ID de auditoría: ' || v_audit || '. ' || (p_data->>'response'));
       perform public.pqr_notice(v_account,v_row.id,'Redigitación requerida',v_row.code || ' espera asignación');
       perform public.pqr_notice(v_row.commercial_id,v_row.id,'PQR en redigitación',v_row.code || ' fue enviada a redigitación');
     else
       v_result := case when v_result='no' then 'No Aplica' else 'Cerrado' end;
       v_data := v_data || jsonb_build_object('status',v_result,'closedAt',v_now);
-      v_data := public.pqr_event(v_data,v_actor.name,case when v_result='No Aplica' then 'No aplica: cierre justificado' else 'Aplica: cierre sin redigitación' end,'ID de auditoría: ' || v_audit || '. ' || p_data->>'response');
+      v_data := public.pqr_event(v_data,v_actor.name,case when v_result='No Aplica' then 'No aplica: cierre justificado' else 'Aplica: cierre sin redigitación' end,'ID de auditoría: ' || v_audit || '. ' || (p_data->>'response'));
       perform public.pqr_notice(v_row.commercial_id,v_row.id,'PQR cerrada',v_row.code || ' fue cerrada');
     end if;
   elsif p_action = 'assign_redigit' then
@@ -207,7 +207,7 @@ begin
     v_name := coalesce(v_data->>'fieldRedigitatorName', (select name from public.pqr_staff where id=(v_data->>'redigitatorPersonId')::uuid),v_actor.name);
     v_data := v_data || jsonb_build_object('audit',v_audit,'redigitNotes',trim(p_data->>'notes'),'redigitAt',v_now,'status',v_result);
     if v_result='Cerrado' then v_data := v_data || jsonb_build_object('closedAt',v_now); end if;
-    v_data := public.pqr_event(v_data,v_name,case when v_result='Cerrado' then 'Redigitación directa completada y cerrada' else 'Redigitación completada' end,'Nueva auditoría: ' || v_audit || '. ' || p_data->>'notes');
+    v_data := public.pqr_event(v_data,v_name,case when v_result='Cerrado' then 'Redigitación directa completada y cerrada' else 'Redigitación completada' end,'Nueva auditoría: ' || v_audit || '. ' || (p_data->>'notes'));
     perform public.pqr_notice(v_row.commercial_id,v_row.id,case when v_result='Cerrado' then 'Redigitación directa cerrada' else 'PQR redigitada' end,v_row.code || ': nueva auditoría ' || v_audit);
     if v_result<>'Cerrado' then perform public.pqr_notice((v_data->>'validator')::uuid,v_row.id,'Verificación pendiente',v_row.code || ' fue redigitada'); end if;
   elsif p_action = 'verify' then
