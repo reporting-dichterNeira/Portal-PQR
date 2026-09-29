@@ -10,30 +10,10 @@
   const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial' };
   const clients = ['KO tradicional', 'KO moderno', 'Lindley', 'P&G', 'CBC', 'Gloria', 'Heineken', 'Fifco', 'ABI', 'Otros'];
   const countries = ['Colombia', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Panamá', 'Perú', 'Bolivia', 'Paraguay', 'Costa Rica', 'Ecuador', 'Chile', 'República Dominicana'];
-  const areaSuggestions = new Map([
-    ['Aprobada una auditoria incompleta', 'Validación'],
-    ['Confunde SKU', 'OPS Campo/Validación'],
-    ['Disponibilidad', 'OPS Campo/Validación'],
-    ['Error al validar los precios', 'OPS Campo/Validación'],
-    ['Error en la clasificación del POC', 'OPS Campo/Validación'],
-    ['Error en la validación del 75% de llenado', 'OPS Campo/Validación'],
-    ['Extraños/Competencia', 'OPS Campo/Validación'],
-    ['Marcó mal la pregunta en activación', 'OPS Campo/Validación'],
-    ['No identificó una exhibición adicional', 'OPS Campo/Validación'],
-    ['No marcó la pregunta en activación', 'OPS Campo/Validación'],
-    ['No tiene material POP / comunicación', 'OPS Campo/Validación'],
-    ['No valida planimetría', 'OPS Campo/Validación'],
-    ['No validó que es una auditoría en PDV incorrecto', 'OPS Campo/Validación'],
-    ['Omisión de etiqueta', 'OPS Campo/Validación'],
-    ['Sin carga de adjuntos', 'Validación'],
-    ['Error Nota "0" no actualiza a nota (según variación)', 'IT'],
-    ['Cambios de Lineamientos', 'Comercial'],
-    ['Error conteo en cajas', 'OPS Campo/Validación'],
-    ['Error de Manual', 'Comercial'],
-    ['Insumos', 'Comercial'],
-  ]);
+  const standardAreas = ['Campo', 'Validación', 'IT', 'Comercial'];
+  const combinedArea = 'OPS Campo/Validación';
   const managerState = { view: 'overview', country: 'all', study: 'all' };
-  let state = { me: null, users: [], staff: { validators: [], redigitators: [] }, tips: [], tickets: [], deleted: [], notifications: [] };
+  let state = { me: null, users: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
   let busy = false;
 
   function showError(error) {
@@ -86,7 +66,7 @@
     const queries = await Promise.all([
       db.from('pqr_profiles').select('id,username,name,role,active').order('name'),
       db.from('pqr_staff').select('*').order('name'),
-      db.from('pqr_tips').select('name').order('name'),
+      db.from('pqr_tips').select('name,suggested_area').order('name'),
       db.from('pqr_tickets').select('id,deleted_at,data').order('created_at', { ascending: false }),
       db.from('pqr_notifications').select('*').order('created_at', { ascending: false }).limit(100),
     ]);
@@ -98,6 +78,7 @@
       me, users: profiles,
       staff: { validators: staff.filter(person => person.role === 'validador'), redigitators: staff.filter(person => person.role === 'redigitador') },
       tips: tips.map(item => item.name),
+      tipAreas: Object.fromEntries(tips.map(item => [item.name, item.suggested_area || ''])),
       tickets: cases.filter(item => !item.deleted_at).map(item => item.data),
       deleted: cases.filter(item => item.deleted_at).map(item => ({ ...item.data, deletedAt: item.deleted_at })),
       notifications,
@@ -175,17 +156,50 @@
     const people = state.staff[role === 'validador' ? 'validators' : 'redigitators'];
     return `<article class="card staff-card"><div class="staff-heading"><div><h3>${title}</h3><p class="sub">Personas responsables bajo una sola cuenta compartida del área.</p></div><button class="secondary" data-action="staff" data-role="${role}">Agregar persona</button></div><div class="list">${people.length ? people.map(person => `<div class="list-item staff-item"><div><strong>${esc(person.name)}</strong><small>${person.active ? 'Activo' : 'Inactivo'}</small></div><div class="actions"><button class="ghost" data-action="staff" data-role="${role}" data-person="${person.id}">Editar</button><button class="${person.active ? 'danger' : 'secondary'}" data-action="toggle-staff" data-role="${role}" data-person="${person.id}">${person.active ? 'Desactivar' : 'Activar'}</button></div></div>`).join('') : '<p class="empty">Sin personas registradas.</p>'}</div></article>`;
   }
+  function suggestionOptions() {
+    const values = [...new Set([combinedArea, ...standardAreas, ...Object.values(state.tipAreas).filter(Boolean)])];
+    return `<option value="">Sin sugerencia</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}<option value="Otra área">Otra área…</option>`;
+  }
+  function tipAreaFields(prefix) {
+    return `<label>Área sugerida<select name="area">${suggestionOptions()}</select></label><label class="hide" id="${prefix}-other-area">¿Cuál otra área?<input name="areaOther" maxlength="100"></label>`;
+  }
+  function bindTipAreaFields(form, prefix) {
+    form.elements.area.onchange = () => {
+      const other = form.elements.area.value === 'Otra área';
+      $(`#${prefix}-other-area`).classList.toggle('hide', !other);
+      form.elements.areaOther.required = other;
+    };
+    form.elements.area.onchange();
+  }
+  function chosenTipArea(form) {
+    const value = form.elements.area.value === 'Otra área' ? form.elements.areaOther.value.trim() : form.elements.area.value;
+    if (form.elements.area.value === 'Otra área' && !value) throw new Error('Escribe el área sugerida.');
+    return value;
+  }
   function admin() {
-    $('#view').innerHTML = `${header('Administración', 'Gestiona cuentas, responsables, tipologías y registros.', '<button class="secondary" data-action="new-user">Nuevo usuario</button>')}<section class="metrics">${metric('PQR radicadas', state.tickets.length)}${metric('Abiertas', state.tickets.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', state.tickets.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section><section class="grid2 staff-grid">${staffCard('validador', 'Analistas de PQR')}${staffCard('redigitador', 'Redigitadores')}</section>${ticketTable(state.tickets, 'admin')}${state.deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${state.deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · PDV ${esc(ticket.pdv)} · ${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}<section class="grid2"><article class="card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Sin correos personales ni compartidos.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></article><article class="card"><h3>Tipologías</h3><div class="list">${state.tips.map(tip => `<div class="list-item">${esc(tip)}<button class="ghost right" data-action="delete-tip" data-tip="${esc(tip)}">Eliminar</button></div>`).join('')}</div><form id="tip-form" class="actions"><input name="name" placeholder="Nueva tipología" required><button class="secondary">Agregar</button></form></article></section>`;
-    const accounts = [...$('#view').querySelectorAll('article')].find(card => card.querySelector('h3')?.textContent === 'Cuentas de acceso');
-    accounts?.parentElement.classList.add('accounts-grid');
+    $('#view').innerHTML = `${header('Administración', 'Gestiona cuentas, responsables, tipologías y registros.', '<button class="secondary" data-action="new-user">Nuevo usuario</button>')}
+      <section class="metrics">${metric('PQR radicadas', state.tickets.length)}${metric('Abiertas', state.tickets.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', state.tickets.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section>
+      <section class="grid2 staff-grid">${staffCard('validador', 'Analistas de PQR')}${staffCard('redigitador', 'Redigitadores')}</section>
+      ${ticketTable(state.tickets, 'admin')}
+      ${state.deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${state.deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · PDV ${esc(ticket.pdv)} · ${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}
+      <section class="card accounts-card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Sin correos personales ni compartidos.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
+      <section class="card tipologies-card"><div class="staff-heading"><div><h3>Tipologías</h3><p class="sub">Define el área sugerida para cada tipología. El analista podrá cambiarla en el dictamen.</p></div><span class="badge">${state.tips.length} registradas</span></div><div class="tipologies-grid">${state.tips.map(tip => `<div class="tipology-item"><strong>${esc(tip)}</strong><small>Área sugerida: ${esc(state.tipAreas[tip] || 'Sin sugerencia')}</small><div class="actions"><button class="secondary" data-action="edit-tip-area" data-tip="${esc(tip)}">Cambiar área</button><button class="ghost" data-action="delete-tip" data-tip="${esc(tip)}">Eliminar</button></div></div>`).join('')}</div><form id="tip-form" class="tip-add-form"><label>Nueva tipología<input name="name" placeholder="Nombre de la tipología" required maxlength="150"></label>${tipAreaFields('new-tip')}<button class="primary">Agregar tipología</button></form></section>`;
+    const accounts = $('.accounts-card');
     accounts?.querySelectorAll('tbody tr').forEach((row, index) => {
       const person = state.users[index];
       const cell = row.lastElementChild;
       cell.classList.add('account-controls');
       cell.insertAdjacentHTML('afterbegin', `<button class="secondary" data-action="credentials" data-id="${esc(person.id)}">Credenciales</button>`);
     });
-    $('#tip-form').onsubmit = async event => { event.preventDefault(); await submit(event.currentTarget, async () => { const { error } = await db.rpc('pqr_admin_tip', { p_name: formData(event.currentTarget).name, p_delete: false }); if (error) throw error; }); };
+    const tipForm = $('#tip-form');
+    bindTipAreaFields(tipForm, 'new-tip');
+    tipForm.onsubmit = async event => { event.preventDefault(); await submit(tipForm, async () => {
+      const name = tipForm.elements.name.value.trim();
+      const area = chosenTipArea(tipForm);
+      const { error } = await db.rpc('pqr_admin_tip', { p_name: name, p_delete: false });
+      if (error) throw error;
+      if (area) { const result = await db.rpc('pqr_admin_tip_area', { p_name: name, p_area: area }); if (result.error) throw result.error; }
+    }); };
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
   function newTicket(direct) {
@@ -206,7 +220,8 @@
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_validator', ticket.id, formData(form))); };
   }
   function dictate(ticket) {
-    modal(`Dictaminar · ${ticket.code}`, `<p class="sub">Responsable: ${esc(staffName('validador', ticket.validatorPersonId))}</p><form id="action-form" class="form-grid"><label class="full">Resultado<select name="decision"><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips, 'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options(['Campo', 'Validación', 'IT', 'Comercial', 'Otra área'], 'Selecciona un área')}</select><small id="area-suggestion" role="status" aria-live="polite">Elige una tipología para ver el área sugerida.</small></label><label class="full hide" id="other-area">Otra área<input name="areaOther" maxlength="100" placeholder="Indica el área responsable"></label><label class="full">ID de auditoría<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required value="${esc(ticket.auditOriginal || '')}"></label><label class="full">Justificación o respuesta<textarea name="response" required minlength="5"></textarea></label><div class="full actions"><button class="primary">Confirmar dictamen</button></div></form>`);
+    const areas = [...new Set([...standardAreas, ...Object.values(state.tipAreas).filter(value => value && value !== combinedArea)])];
+    modal(`Dictaminar · ${ticket.code}`, `<p class="sub">Responsable: ${esc(staffName('validador', ticket.validatorPersonId))}</p><form id="action-form" class="form-grid"><label class="full">Resultado<select name="decision"><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips, 'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options([...areas, 'Otra área'], 'Selecciona un área')}</select><small id="area-suggestion" role="status" aria-live="polite">Elige una tipología para ver el área sugerida.</small></label><label class="full hide" id="other-area">Otra área<input name="areaOther" maxlength="100" placeholder="Indica el área responsable"></label><label class="full">ID de auditoría<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required value="${esc(ticket.auditOriginal || '')}"></label><label class="full">Justificación o respuesta<textarea name="response" required minlength="5"></textarea></label><div class="full actions"><button class="primary">Confirmar dictamen</button></div></form>`);
     const form = $('#action-form');
     const updateOtherArea = () => {
       const other = form.elements.area.value === 'Otra área';
@@ -214,8 +229,8 @@
       form.elements.areaOther.required = other;
     };
     form.elements.tipology.onchange = () => {
-      const suggestion = areaSuggestions.get(form.elements.tipology.value);
-      const combined = suggestion === 'OPS Campo/Validación';
+      const suggestion = state.tipAreas[form.elements.tipology.value];
+      const combined = suggestion === combinedArea;
       $('#area-suggestion').textContent = suggestion
         ? `Sugerencia: ${suggestion}. ${combined ? 'Escoge Campo o Validación como área final.' : 'Puedes cambiarla si corresponde.'}`
         : 'Sin sugerencia para esta tipología. Selecciona el área que corresponda.';
@@ -227,7 +242,7 @@
       form.elements.tipology.value = ticket.tipology;
       form.elements.tipology.onchange();
       if (ticket.area) {
-        if (['Campo', 'Validación', 'IT', 'Comercial'].includes(ticket.area)) form.elements.area.value = ticket.area;
+        if (areas.includes(ticket.area)) form.elements.area.value = ticket.area;
         else { form.elements.area.value = 'Otra área'; form.elements.areaOther.value = ticket.area; }
       }
       updateOtherArea();
@@ -263,6 +278,16 @@
   function staffForm(role, person) {
     modal(`${person ? 'Editar' : 'Agregar'} ${role === 'validador' ? 'Analista de PQR' : 'Redigitador'}`, `<form id="action-form" class="stack"><label>Nombre<input name="name" required minlength="3" maxlength="100" value="${esc(person?.name || '')}"></label><div class="actions"><button class="primary">Guardar</button></div></form>`);
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.rpc('pqr_admin_staff', { p_id: person?.id || null, p_role: role, p_name: formData(form).name, p_active: person?.active ?? true }); if (error) throw error; }); };
+  }
+  function editTipArea(tip) {
+    modal(`Área sugerida · ${tip}`, `<p class="sub">Esta sugerencia aparecerá al seleccionar la tipología. El analista podrá escoger otra área para cada PQR.</p><form id="action-form" class="stack">${tipAreaFields('edit-tip')}<div class="actions"><button class="primary">Guardar sugerencia</button></div></form>`);
+    const form = $('#action-form');
+    form.elements.area.value = state.tipAreas[tip] || '';
+    bindTipAreaFields(form, 'edit-tip');
+    form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => {
+      const { error } = await db.rpc('pqr_admin_tip_area', { p_name: tip, p_area: chosenTipArea(form) });
+      if (error) throw error;
+    }); };
   }
   function userForm(person) {
     modal(person ? `Cuenta · ${person.name}` : 'Nuevo usuario', `<form id="action-form" class="stack"><label>Nombre<input name="name" required minlength="3" value="${esc(person?.name || '')}" ${person ? 'disabled' : ''}></label><label>Usuario<input name="username" required minlength="3" maxlength="32" autocomplete="username" value="${esc(person?.username || '')}"></label>${person ? '' : `<label>Rol<select name="role">${Object.entries(roles).filter(([role]) => role !== 'admin').map(([role, label]) => `<option value="${role}">${esc(label)}</option>`).join('')}</select></label>`}<label>${person ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input name="password" type="password" autocomplete="new-password" minlength="12" ${person ? '' : 'required'}><small>Mínimo 12 caracteres. No la compartas por correo.</small></label><div class="actions"><button class="primary">${person ? 'Guardar cambios' : 'Crear cuenta'}</button></div></form>`);
@@ -332,6 +357,7 @@
         return;
       }
       if (type === 'edit-user') return userForm(state.users.find(person => person.id === button.dataset.id));
+      if (type === 'edit-tip-area' && state.me.role === 'admin' && state.tips.includes(button.dataset.tip)) return editTipArea(button.dataset.tip);
       if (type === 'staff') return staffForm(button.dataset.role, [...state.staff.validators, ...state.staff.redigitators].find(person => person.id === button.dataset.person));
       if (type === 'toggle-staff') { const person = [...state.staff.validators, ...state.staff.redigitators].find(item => item.id === button.dataset.person); const { error } = await db.rpc('pqr_admin_staff', { p_id: person.id, p_role: person.role, p_name: person.name, p_active: !person.active }); if (error) throw error; await load(); return; }
       if (type === 'delete-tip') { if (confirm(`¿Eliminar la tipología «${button.dataset.tip}»?`)) { const { error } = await db.rpc('pqr_admin_tip', { p_name: button.dataset.tip, p_delete: true }); if (error) throw error; await load(); } return; }
