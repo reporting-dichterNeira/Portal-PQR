@@ -10,6 +10,28 @@
   const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial' };
   const clients = ['KO tradicional', 'KO moderno', 'Lindley', 'P&G', 'CBC', 'Gloria', 'Heineken', 'Fifco', 'ABI', 'Otros'];
   const countries = ['Colombia', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Panamá', 'Perú', 'Bolivia', 'Paraguay', 'Costa Rica', 'Ecuador', 'Chile', 'República Dominicana'];
+  const areaSuggestions = new Map([
+    ['Aprobada una auditoria incompleta', 'Validación'],
+    ['Confunde SKU', 'OPS Campo/Validación'],
+    ['Disponibilidad', 'OPS Campo/Validación'],
+    ['Error al validar los precios', 'OPS Campo/Validación'],
+    ['Error en la clasificación del POC', 'OPS Campo/Validación'],
+    ['Error en la validación del 75% de llenado', 'OPS Campo/Validación'],
+    ['Extraños/Competencia', 'OPS Campo/Validación'],
+    ['Marcó mal la pregunta en activación', 'OPS Campo/Validación'],
+    ['No identificó una exhibición adicional', 'OPS Campo/Validación'],
+    ['No marcó la pregunta en activación', 'OPS Campo/Validación'],
+    ['No tiene material POP / comunicación', 'OPS Campo/Validación'],
+    ['No valida planimetría', 'OPS Campo/Validación'],
+    ['No validó que es una auditoría en PDV incorrecto', 'OPS Campo/Validación'],
+    ['Omisión de etiqueta', 'OPS Campo/Validación'],
+    ['Sin carga de adjuntos', 'Validación'],
+    ['Error Nota "0" no actualiza a nota (según variación)', 'IT'],
+    ['Cambios de Lineamientos', 'Comercial'],
+    ['Error conteo en cajas', 'OPS Campo/Validación'],
+    ['Error de Manual', 'Comercial'],
+    ['Insumos', 'Comercial'],
+  ]);
   const managerState = { view: 'overview', country: 'all', study: 'all' };
   let state = { me: null, users: [], staff: { validators: [], redigitators: [] }, tips: [], tickets: [], deleted: [], notifications: [] };
   let busy = false;
@@ -184,8 +206,39 @@
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_validator', ticket.id, formData(form))); };
   }
   function dictate(ticket) {
-    modal(`Dictaminar · ${ticket.code}`, `<p class="sub">Responsable: ${esc(staffName('validador', ticket.validatorPersonId))}</p><form id="action-form" class="form-grid"><label class="full">Resultado<select name="decision"><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology">${state.tips.map(tip => `<option>${esc(tip)}</option>`).join('')}</select></label><label>Área responsable<select name="area"><option>IT</option><option>Comercial</option><option>Campo</option><option>Validación</option></select></label><label class="full">ID de auditoría<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required value="${esc(ticket.auditOriginal || '')}"></label><label class="full">Justificación o respuesta<textarea name="response" required minlength="5"></textarea></label><div class="full actions"><button class="primary">Confirmar dictamen</button></div></form>`);
-    const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('dictate', ticket.id, formData(form))); };
+    modal(`Dictaminar · ${ticket.code}`, `<p class="sub">Responsable: ${esc(staffName('validador', ticket.validatorPersonId))}</p><form id="action-form" class="form-grid"><label class="full">Resultado<select name="decision"><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips, 'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options(['Campo', 'Validación', 'IT', 'Comercial', 'Otra área'], 'Selecciona un área')}</select><small id="area-suggestion" role="status" aria-live="polite">Elige una tipología para ver el área sugerida.</small></label><label class="full hide" id="other-area">Otra área<input name="areaOther" maxlength="100" placeholder="Indica el área responsable"></label><label class="full">ID de auditoría<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required value="${esc(ticket.auditOriginal || '')}"></label><label class="full">Justificación o respuesta<textarea name="response" required minlength="5"></textarea></label><div class="full actions"><button class="primary">Confirmar dictamen</button></div></form>`);
+    const form = $('#action-form');
+    const updateOtherArea = () => {
+      const other = form.elements.area.value === 'Otra área';
+      $('#other-area').classList.toggle('hide', !other);
+      form.elements.areaOther.required = other;
+    };
+    form.elements.tipology.onchange = () => {
+      const suggestion = areaSuggestions.get(form.elements.tipology.value);
+      const combined = suggestion === 'OPS Campo/Validación';
+      $('#area-suggestion').textContent = suggestion
+        ? `Sugerencia: ${suggestion}. ${combined ? 'Escoge Campo o Validación como área final.' : 'Puedes cambiarla si corresponde.'}`
+        : 'Sin sugerencia para esta tipología. Selecciona el área que corresponda.';
+      form.elements.area.value = suggestion && !combined ? suggestion : '';
+      updateOtherArea();
+    };
+    form.elements.area.onchange = updateOtherArea;
+    if (ticket.tipology && state.tips.includes(ticket.tipology)) {
+      form.elements.tipology.value = ticket.tipology;
+      form.elements.tipology.onchange();
+      if (ticket.area) {
+        if (['Campo', 'Validación', 'IT', 'Comercial'].includes(ticket.area)) form.elements.area.value = ticket.area;
+        else { form.elements.area.value = 'Otra área'; form.elements.areaOther.value = ticket.area; }
+      }
+      updateOtherArea();
+    }
+    form.onsubmit = async event => { event.preventDefault(); await submit(form, () => {
+      const payload = formData(form);
+      if (payload.area === 'Otra área') payload.area = payload.areaOther.trim();
+      if (!payload.area) throw new Error('Selecciona o escribe el área responsable.');
+      delete payload.areaOther;
+      return action('dictate', ticket.id, payload);
+    }); };
   }
   function assignRedigit(ticket) {
     const people = state.staff.redigitators.filter(person => person.active);
