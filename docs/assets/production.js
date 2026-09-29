@@ -316,7 +316,7 @@
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_validator', ticket.id, formData(form))); };
   }
   function dictate(ticket) {
-    const areas = [...new Set([...standardAreas, ...Object.values(state.tipAreas).filter(value => value && value !== combinedArea)])];
+    const areas = [...new Set([combinedArea, ...standardAreas, ...Object.values(state.tipAreas).filter(Boolean)])];
     modal(`Dictaminar · ${ticket.code}`, `<p class="sub">Responsable: ${esc(staffName('validador', ticket.validatorPersonId))}</p><form id="action-form" class="form-grid"><label class="full">Resultado<select name="decision"><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips, 'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options([...areas, 'Otra área'], 'Selecciona un área')}</select><small id="area-suggestion" role="status" aria-live="polite">Elige una tipología para ver el área sugerida.</small></label><label class="full hide" id="other-area">Otra área<input name="areaOther" maxlength="100" placeholder="Indica el área responsable"></label><label class="full">ID de auditoría<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required value="${esc(ticket.auditOriginal || '')}"></label><label class="full">Justificación o respuesta<textarea name="response" required minlength="5"></textarea></label><div class="full actions"><button class="primary">Confirmar dictamen</button></div></form>`);
     const form = $('#action-form');
     const updateOtherArea = () => {
@@ -326,11 +326,10 @@
     };
     form.elements.tipology.onchange = () => {
       const suggestion = state.tipAreas[form.elements.tipology.value];
-      const combined = suggestion === combinedArea;
       $('#area-suggestion').textContent = suggestion
-        ? `Sugerencia: ${suggestion}. ${combined ? 'Escoge Campo o Validación como área final.' : 'Puedes cambiarla si corresponde.'}`
+        ? `Sugerencia: ${suggestion}. Puedes cambiarla si corresponde.`
         : 'Sin sugerencia para esta tipología. Selecciona el área que corresponda.';
-      form.elements.area.value = suggestion && !combined ? suggestion : '';
+      form.elements.area.value = suggestion || '';
       updateOtherArea();
     };
     form.elements.area.onchange = updateOtherArea;
