@@ -12,6 +12,9 @@
   const countries = ['Colombia', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Panamá', 'Perú', 'Bolivia', 'Paraguay', 'Costa Rica', 'Ecuador', 'Chile', 'República Dominicana'];
   const standardAreas = ['Campo', 'Validación', 'IT', 'Comercial'];
   const combinedArea = 'OPS Campo/Validación';
+  const attachmentBucket = 'pqr-adjuntos';
+  const maxAttachmentBytes = 10 * 1024 * 1024;
+  const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   const managerState = { view: 'overview', country: 'all', study: 'all' };
   let state = { me: null, users: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
   let busy = false;
@@ -44,6 +47,39 @@
   }
   function closeModal() { $('#modal')?.remove(); }
   function formData(form) { return Object.fromEntries(new FormData(form).entries()); }
+  function attachmentField() { return '<label class="full attachment-field">Adjuntos (opcional)<input name="attachments" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,.xls,.xlsx"><small>Una o más imágenes o archivos Excel (.xls, .xlsx). Máximo 10 archivos, 10 MB cada uno.</small><span class="attachment-selection" aria-live="polite"></span></label>'; }
+  function bindAttachmentSelection(form) {
+    const input = form.elements.attachments;
+    input.onchange = () => {
+      const names = Array.from(input.files, file => file.name);
+      form.querySelector('.attachment-selection').textContent = names.length ? `${names.length} archivo(s): ${names.join(', ')}` : '';
+    };
+  }
+  function checkedAttachments(input) {
+    const files = Array.from(input.files || []);
+    if (files.length > 10) throw new Error('Selecciona máximo 10 archivos por carga.');
+    for (const file of files) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (!attachmentTypes[ext] || (file.type && file.type !== attachmentTypes[ext])) throw new Error(`Formato no permitido: ${file.name}. Usa imágenes o Excel (.xls, .xlsx).`);
+      if (!file.size || file.size > maxAttachmentBytes) throw new Error(`${file.name} debe tener contenido y no superar 10 MB.`);
+    }
+    return files;
+  }
+  async function uploadAttachments(ticket, files, status) {
+    const failures = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (status) status.textContent = `Cargando adjunto ${i + 1} de ${files.length}: ${file.name}`;
+      const name = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-140);
+      const path = `${ticket.id}/${crypto.randomUUID()}-${name}`;
+      try {
+        const { error } = await db.storage.from(attachmentBucket).upload(path, file, { contentType: attachmentTypes[file.name.split('.').pop().toLowerCase()], upsert: false });
+        if (error) throw error;
+      } catch (error) { console.error('Error al cargar adjunto:', file.name, error); failures.push(file.name); }
+    }
+    return failures;
+  }
+  function attachmentName(path) { return path.replace(/^[0-9a-f-]{36}-/, '').replace(/_/g, ' '); }
   function lock(form, locked) { form.querySelectorAll('button[type="submit"],button:not([type])').forEach(el => { el.disabled = locked; }); }
   async function submit(form, task) {
     if (busy) return;
@@ -203,14 +239,74 @@
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
   function newTicket(direct) {
-    modal(direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid"><label>ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : '<label>Archivo de referencia (opcional)<input name="file" type="file" disabled><small>Adjuntos no habilitados aún en el portal oficial.</small></label>'}<label class="full">Descripción<textarea name="description" required minlength="8"></textarea></label><div class="full actions"><button class="primary">${direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
+    modal(direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid"><label>ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">Descripción<textarea name="description" required minlength="8"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
     const form = $('#case-form');
+    bindAttachmentSelection(form);
     form.elements.client.onchange = () => { const other = form.elements.client.value === 'Otros'; $('#other-client').classList.toggle('hide', !other); form.elements.clientOther.required = other; };
-    form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const payload = formData(form); payload.client = payload.client === 'Otros' ? payload.clientOther.trim() : payload.client; await action(direct ? 'direct_create' : 'create', null, payload); }); };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      let files;
+      try { files = checkedAttachments(form.elements.attachments); } catch (error) { showError(error); return; }
+      let created;
+      let failures = [];
+      await submit(form, async () => {
+        const payload = formData(form);
+        delete payload.attachments;
+        delete payload.clientOther;
+        payload.client = form.elements.client.value === 'Otros' ? form.elements.clientOther.value.trim() : form.elements.client.value;
+        created = await action(direct ? 'direct_create' : 'create', null, payload);
+        failures = await uploadAttachments(created, files, $('#upload-progress'));
+      });
+      if (created && failures.length) alert(`${created.code} se creó correctamente, pero no se pudieron cargar estos adjuntos: ${failures.join(', ')}. Abre Detalle para reintentarlo.`);
+    };
   }
   function detail(ticket) {
     const events = ticket.timeline || [];
-    modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Cliente:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)} · <strong>PDV:</strong> ${esc(ticket.pdv)}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')} · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}</p><p><strong>Descripción:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}</div><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
+    const canAdd = state.me.role === 'comercial' && ticket.commercial === state.me.id && !ticket.deletedAt;
+    modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Cliente:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)} · <strong>PDV:</strong> ${esc(ticket.pdv)}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')} · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}</p><p><strong>Descripción:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
+    loadAttachments(ticket.id);
+    if (canAdd) {
+      const form = $('#add-attachments');
+      bindAttachmentSelection(form);
+      form.onsubmit = async event => {
+        event.preventDefault();
+        let files;
+        try { files = checkedAttachments(form.elements.attachments); } catch (error) { showError(error); return; }
+        if (!files.length) { showError(new Error('Selecciona al menos un archivo.')); return; }
+        if (busy) return;
+        busy = true; lock(form, true);
+        try {
+          const failures = await uploadAttachments(ticket, files, $('#upload-progress'));
+          form.reset(); form.querySelector('.attachment-selection').textContent = '';
+          $('#upload-progress').textContent = failures.length ? `No se pudieron cargar: ${failures.join(', ')}.` : 'Adjuntos cargados correctamente.';
+          await loadAttachments(ticket.id);
+        } catch (error) { showError(error); } finally { busy = false; lock(form, false); }
+      };
+    }
+  }
+  async function loadAttachments(ticketId) {
+    try {
+      const { data, error } = await db.storage.from(attachmentBucket).list(ticketId, { limit: 100, sortBy: { column: 'name', order: 'asc' } });
+      if (error) throw error;
+      const target = $('#attachment-list');
+      if (!target || target.dataset.ticket !== ticketId) return;
+      target.innerHTML = data?.length ? `<div class="attachment-list">${data.map(file => `<button class="ghost attachment-item" data-action="download-attachment" data-id="${esc(ticketId)}" data-file="${esc(file.name)}" title="Descargar ${esc(attachmentName(file.name))}"><span>${esc(attachmentName(file.name))}</span><small>Descargar</small></button>`).join('')}</div>` : '<p class="sub">Este ticket no tiene adjuntos.</p>';
+    } catch (error) {
+      console.error('Error al consultar adjuntos:', error);
+      const target = $('#attachment-list');
+      if (target?.dataset.ticket === ticketId) target.textContent = 'No se pudieron consultar los adjuntos. Vuelve a abrir el detalle.';
+    }
+  }
+  async function downloadAttachment(ticketId, fileName) {
+    const { data, error } = await db.storage.from(attachmentBucket).download(`${ticketId}/${fileName}`);
+    if (error) throw error;
+    const url = window.URL.createObjectURL(data);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = attachmentName(fileName);
+    document.body.append(link);
+    link.click(); link.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 60000);
   }
   function assignValidator(ticket) {
     const people = state.staff.validators.filter(person => person.active);
@@ -331,6 +427,7 @@
         return;
       }
       if (type === 'detail' && ticket) return detail(ticket);
+      if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
       if (type === 'new-ticket' || type === 'new-direct') return newTicket(type === 'new-direct');
       if (type === 'assign-validator' && ticket) return assignValidator(ticket);
       if (type === 'dictate' && ticket) return dictate(ticket);
