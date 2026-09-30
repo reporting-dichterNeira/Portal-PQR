@@ -208,7 +208,7 @@
       if (requestType(ticket) === 'PQR' && ['Cerrado', 'No Aplica'].includes(ticket.status)) result += `<button class="danger" data-action="reopen" data-id="${ticket.id}">Reabrir</button>`;
       return result;
     }
-    if (role === 'redigitador' && ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)) return `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">Asignar</button>${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Registrar edición' : 'Redigitar'}</button>` : ''}`;
+    if (role === 'redigitador' && ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)) return `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Asignar edición' : 'Asignar'}</button>${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Registrar edición' : 'Redigitar'}</button>` : ''}`;
     if (role === 'comercial' && ticket.status === 'Cerrado' && !ticket.feedback) return `<button class="secondary" data-action="feedback" data-id="${ticket.id}">Calificar</button>`;
     return '';
   }
@@ -402,10 +402,13 @@
   }
   function assignRedigit(ticket) {
     const people = state.staff.redigitators.filter(person => person.active);
-    modal(`Asignar redigitación · ${ticket.code}`, `<form id="action-form" class="stack"><label>Tipo<select name="redigitType"><option>Validación</option><option>Campo</option></select></label><div id="validation-panel"><label>Redigitador<select name="personId"><option value="">Selecciona una persona</option>${people.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select></label></div><div id="field-panel" class="hide"><label>Persona de Campo<input name="fieldPerson" maxlength="100" placeholder="Nombre y apellido"></label></div><div class="actions"><button class="primary">Confirmar responsable</button></div></form>`);
+    const edition = requestType(ticket) === 'EDC';
+    modal(`${edition ? 'Asignar edición' : 'Asignar redigitación'} · ${ticket.code}`, `<form id="action-form" class="stack">${edition ? '<div class="notice">Las ediciones solo pueden ser gestionadas por Validación.</div><input type="hidden" name="redigitType" value="Validación">' : '<label>Tipo<select name="redigitType"><option>Validación</option><option>Campo</option></select></label>'}<div id="validation-panel"><label>Redigitador de Validación<select name="personId" required><option value="">Selecciona una persona</option>${people.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select></label></div>${edition ? '' : '<div id="field-panel" class="hide"><label>Persona de Campo<input name="fieldPerson" maxlength="100" placeholder="Nombre y apellido"></label></div>'}<div class="actions"><button class="primary">Confirmar responsable</button></div></form>`);
     const form = $('#action-form');
-    form.elements.redigitType.onchange = () => { const field = form.elements.redigitType.value === 'Campo'; $('#field-panel').classList.toggle('hide', !field); $('#validation-panel').classList.toggle('hide', field); form.elements.fieldPerson.required = field; form.elements.personId.required = !field; };
-    form.elements.redigitType.onchange();
+    if (!edition) {
+      form.elements.redigitType.onchange = () => { const field = form.elements.redigitType.value === 'Campo'; $('#field-panel').classList.toggle('hide', !field); $('#validation-panel').classList.toggle('hide', field); form.elements.fieldPerson.required = field; form.elements.personId.required = !field; };
+      form.elements.redigitType.onchange();
+    }
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_redigit', ticket.id, formData(form))); };
   }
   function redigit(ticket) {

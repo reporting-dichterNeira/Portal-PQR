@@ -7,3 +7,5 @@ La clave `SUPABASE_SERVICE_ROLE_KEY` solo se lee desde el entorno de la función
 No se importaron los datos de prueba del piloto. La base oficial comenzó con una sola cuenta, `admin`, y sin tickets.
 
 La migración `20260930120000_tipos_solicitud_edicion.sql` agrega `pqr_create_special` para las solicitudes RDG y EDC. Las RDG directas históricas conservan UUID e historial y cambian su prefijo PQR por RDG; las PQR ordinarias no cambian. Una EDC entra a Redigitación, pasa luego a verificación y solo un Analista de PQR puede dar el cierre definitivo.
+
+La restricción `20260930192100_edc_solo_validacion.sql` impide asignar ediciones EDC a Campo, incluso si se llama la función de asignación directamente. Las PQR y RDG conservan ambas rutas.
