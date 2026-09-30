@@ -20,3 +20,25 @@
 @media(max-width:900px){.manager-grid{grid-template-columns:1fr}.dashboard-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.card-heading{align-items:flex-start;flex-direction:column;gap:2px}.card-heading small{text-align:left}}
 @media(max-width:560px){.dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.export-actions{width:100%;justify-content:flex-start}.export-actions button{flex:1 1 130px}.manager-tabs{width:100%;max-width:none}.manager-tabs button{flex:1}.detail-filters{width:100%}.detail-filters label{width:100%}.decision-chart{gap:16px;flex-wrap:wrap}.decision-ring{width:154px;height:154px}.decision-ring>div{width:108px;height:108px}.decision-ring strong{font-size:2rem}.ring-legend{width:100%;grid-template-columns:1fr 1fr}.ring-legend>div{grid-template-columns:12px 1fr;gap:5px}.ring-legend strong{grid-column:2}}
 @media(max-width:1050px){.app-header{flex-wrap:wrap;gap:10px}.nav{order:3;flex-basis:100%}.user{margin-left:auto}}@media(max-width:760px){.layout{padding:22px 15px}.metrics{grid-template-columns:repeat(2,1fr)}.grid2,.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:auto}.app-header{padding:10px 15px}.nav{overflow-x:auto;padding-bottom:2px}.nav button{flex-shrink:0}.user span{display:none}.card{padding:16px}.table{min-width:710px}.ticket-table{min-width:0}.ticket-table thead{display:none}.ticket-table tbody{display:grid;gap:12px}.ticket-table tr{display:block;padding:9px 12px;border:1px solid var(--line);border-radius:10px}.ticket-table td{display:block;padding:8px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere;text-align:left}.ticket-table td:last-child{border:0}.ticket-table td:before{content:attr(data-label);display:block;margin-bottom:2px;color:var(--muted);font-size:.77rem;font-weight:700;text-transform:uppercase}}@media(max-width:430px){.login-card{padding:24px}.brand{min-width:0;font-size:1.08rem}.brand img{width:34px;height:34px}.user{gap:4px}.user .ghost{padding:6px 8px}.metric{padding:13px}}
+
+/* Escala legible en monitores grandes, sin perder la distribución móvil. */
+html{font-size:clamp(16px,calc(.75vw + 6px),21px)}
+.layout{width:100%;max-width:1880px;padding-inline:clamp(20px,2.2vw,42px)}
+.app-header{padding-inline:max(clamp(20px,2.2vw,42px),calc((100vw - 1880px)/2 + 42px))}
+.login-card{width:min(100%,600px);padding:clamp(28px,3vw,50px)}
+.modal-box{width:min(100%,820px)}
+input,select,textarea{min-height:2.75rem}
+.primary,.secondary,.danger,.ghost{min-height:2.5rem}
+.attachment-field{display:grid;justify-items:start;gap:9px;min-width:0}
+.attachment-field>strong{font-size:.88rem}
+.attachment-field .attachment-add{justify-self:start}
+.attachment-field .attachment-picker{position:absolute;width:1px;height:1px;min-height:0;padding:0;opacity:0;pointer-events:none}
+.attachment-selection{width:100%;font-size:.83rem}
+.attachment-selection p{margin:2px 0 8px}
+.attachment-selection ul{display:grid;gap:7px;margin:0;padding:0;list-style:none}
+.attachment-selection li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--soft)}
+.attachment-selection li span{min-width:0;overflow-wrap:anywhere}
+.attachment-selection li button{flex:none;min-height:32px;padding:4px 9px;font-size:.78rem}
+.attachment-selection .attachment-error{color:#a82750;font-weight:700}
+@media(max-width:760px){.layout{padding-inline:15px}.app-header{padding-inline:15px}.modal-box{padding:20px}}
+@media(max-width:430px){.login-card{padding:24px}.attachment-selection li{align-items:flex-start;flex-direction:column}}

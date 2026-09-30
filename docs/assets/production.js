@@ -47,16 +47,44 @@
   }
   function closeModal() { $('#modal')?.remove(); }
   function formData(form) { return Object.fromEntries(new FormData(form).entries()); }
-  function attachmentField() { return '<label class="full attachment-field">Adjuntos (opcional)<input name="attachments" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,.xls,.xlsx"><small>Una o más imágenes o archivos Excel (.xls, .xlsx). Máximo 10 archivos, 10 MB cada uno.</small><span class="attachment-selection" aria-live="polite"></span></label>'; }
+  function attachmentField() { return '<div class="full attachment-field"><strong>Adjuntos (opcional)</strong><input name="attachments" class="attachment-picker" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,.xls,.xlsx" aria-label="Seleccionar imágenes o archivos Excel"><button type="button" class="secondary attachment-add">Seleccionar varios archivos</button><small>Puedes elegir varias imágenes o archivos Excel a la vez, o volver a este botón para añadir más. Máximo 10 archivos, 10 MB cada uno.</small><div class="attachment-selection" aria-live="polite"></div></div>'; }
   function bindAttachmentSelection(form) {
     const input = form.elements.attachments;
+    const selection = form.querySelector('.attachment-selection');
+    input._selectedFiles = [];
+    const render = () => {
+      selection.innerHTML = input._selectedFiles.length
+        ? `<p>${input._selectedFiles.length} archivo(s) seleccionado(s)</p><ul>${input._selectedFiles.map((file, index) => `<li><span>${esc(file.name)}</span><button type="button" class="ghost" data-remove-attachment="${index}" aria-label="Quitar ${esc(file.name)}">Quitar</button></li>`).join('')}</ul>`
+        : '';
+    };
+    form.querySelector('.attachment-add').onclick = () => input.click();
     input.onchange = () => {
-      const names = Array.from(input.files, file => file.name);
-      form.querySelector('.attachment-selection').textContent = names.length ? `${names.length} archivo(s): ${names.join(', ')}` : '';
+      const chosen = Array.from(input.files || []);
+      const key = file => `${file.name}\0${file.size}\0${file.lastModified}`;
+      const known = new Set(input._selectedFiles.map(key));
+      const additions = chosen.filter(file => {
+        const id = key(file);
+        if (known.has(id)) return false;
+        known.add(id);
+        return true;
+      });
+      input.value = '';
+      if (input._selectedFiles.length + additions.length > 10) {
+        selection.insertAdjacentHTML('beforeend', '<p class="attachment-error">Máximo 10 archivos por carga. Quita alguno antes de añadir más.</p>');
+        return;
+      }
+      input._selectedFiles.push(...additions);
+      render();
+    };
+    selection.onclick = event => {
+      const button = event.target.closest('[data-remove-attachment]');
+      if (!button) return;
+      input._selectedFiles.splice(Number(button.dataset.removeAttachment), 1);
+      render();
     };
   }
   function checkedAttachments(input) {
-    const files = Array.from(input.files || []);
+    const files = Array.from(input._selectedFiles || input.files || []);
     if (files.length > 10) throw new Error('Selecciona máximo 10 archivos por carga.');
     for (const file of files) {
       const ext = file.name.split('.').pop()?.toLowerCase();
@@ -277,7 +305,7 @@
         busy = true; lock(form, true);
         try {
           const failures = await uploadAttachments(ticket, files, $('#upload-progress'));
-          form.reset(); form.querySelector('.attachment-selection').textContent = '';
+          form.reset(); form.elements.attachments._selectedFiles = []; form.querySelector('.attachment-selection').innerHTML = '';
           $('#upload-progress').textContent = failures.length ? `No se pudieron cargar: ${failures.join(', ')}.` : 'Adjuntos cargados correctamente.';
           await loadAttachments(ticket.id);
         } catch (error) { showError(error); } finally { busy = false; lock(form, false); }
