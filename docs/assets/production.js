@@ -16,7 +16,10 @@
   const attachmentBucket = 'pqr-adjuntos';
   const maxAttachmentBytes = 10 * 1024 * 1024;
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-  const managerState = { view: 'overview', country: 'all', study: 'all' };
+  const managerState = { view: 'overview', country: 'all', study: 'all', type: 'all' };
+  const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
+  const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
+  const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
   let state = { me: null, users: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
   let busy = false;
 
@@ -120,6 +123,11 @@
     if (error) throw error;
     return data;
   }
+  async function createSpecial(kind, payload) {
+    const { data, error } = await db.rpc('pqr_create_special', { p_kind: kind, p_data: payload });
+    if (error) throw error;
+    return data;
+  }
   async function adminFunction(payload) {
     const { data, error } = await db.functions.invoke('pqr-admin', { body: payload });
     if (error) {
@@ -184,29 +192,32 @@
     return admin();
   }
   function ticketTable(cases, role) {
-    if (!cases.length) return '<section class="card empty">No hay casos en esta bandeja.</section>';
-    return `<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${cases.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong>${ticket.directRedigitation ? ' <span class="badge direct-badge">Directa</span>' : ''}<br><small>${fmt(ticket.createdAt)}</small></td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv)} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>Redigitación de ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
+    const selected = listTypes[role] || 'all';
+    const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
+    const filter = `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
+    if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
+    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small></td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>Redigitación de ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
     if (role === 'validador') {
       let result = '';
       if (['Radicado', 'Reabierto', 'En Validación', 'Pendiente de Verificación'].includes(ticket.status)) result += `<button class="secondary" data-action="assign-validator" data-id="${ticket.id}">${ticket.validatorPersonId ? 'Reasignar' : 'Asignar'}</button>`;
-      if (ticket.validatorPersonId && ['En Validación', 'Reabierto'].includes(ticket.status)) result += `<button class="primary" data-action="dictate" data-id="${ticket.id}">Dictaminar</button>`;
+      if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ['En Validación', 'Reabierto'].includes(ticket.status)) result += `<button class="primary" data-action="dictate" data-id="${ticket.id}">Dictaminar</button>`;
       if (ticket.validatorPersonId && ticket.status === 'Pendiente de Verificación') result += `<button class="primary" data-action="verify" data-id="${ticket.id}">Verificar</button>`;
-      if (['Cerrado', 'No Aplica'].includes(ticket.status)) result += `<button class="danger" data-action="reopen" data-id="${ticket.id}">Reabrir</button>`;
+      if (requestType(ticket) === 'PQR' && ['Cerrado', 'No Aplica'].includes(ticket.status)) result += `<button class="danger" data-action="reopen" data-id="${ticket.id}">Reabrir</button>`;
       return result;
     }
-    if (role === 'redigitador' && ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)) return `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">Asignar</button>${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">Redigitar</button>` : ''}`;
+    if (role === 'redigitador' && ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)) return `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">Asignar</button>${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Registrar edición' : 'Redigitar'}</button>` : ''}`;
     if (role === 'comercial' && ticket.status === 'Cerrado' && !ticket.feedback) return `<button class="secondary" data-action="feedback" data-id="${ticket.id}">Calificar</button>`;
     return '';
   }
   function commercial() {
     const cases = state.tickets.filter(ticket => ticket.commercial === state.me.id);
-    $('#view').innerHTML = `${header('Mis solicitudes', 'Radica una PQR o solicita redigitación directa.', '<button class="secondary" data-action="new-direct">Solicitar redigitación directa</button><button class="primary" data-action="new-ticket">Nueva PQR</button>')}<section class="metrics">${metric('Radicadas', cases.length)}${metric('En gestión', cases.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'comercial')}`;
+    $('#view').innerHTML = `${header('Mis solicitudes', 'Radica PQR, redigitaciones o ediciones de auditoría.', '<button class="secondary" data-action="new-edit">Solicitar edición</button><button class="secondary" data-action="new-direct">Solicitar redigitación directa</button><button class="primary" data-action="new-ticket">Nueva PQR</button>')}<section class="metrics">${metric('Radicadas', cases.length)}${metric('En gestión', cases.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'comercial')}`;
   }
   function analyst() {
-    const cases = state.tickets.filter(ticket => !ticket.directRedigitation);
+    const cases = state.tickets.filter(ticket => requestType(ticket) !== 'RDG');
     $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
   }
   function redigitator() {
@@ -218,8 +229,9 @@
     $('#dashboard-status-filter')?.addEventListener('change', event => {
       let count = 0;
       document.querySelectorAll('[data-case-status]').forEach(row => { row.hidden = event.target.value !== 'all' && row.dataset.caseStatus !== event.target.value; if (!row.hidden) count++; });
-      const label = $('#dashboard-filter-count'); if (label) label.textContent = `${count} de ${state.tickets.length} casos`;
+      const label = $('#dashboard-filter-count'); if (label) label.textContent = `${count} de ${document.querySelectorAll('[data-case-status]').length} casos`;
     });
+    $('#manager-type-filter')?.addEventListener('change', event => { managerState.type = event.target.value; dashboard(); });
     $('#manager-country-filter')?.addEventListener('change', event => { managerState.country = event.target.value; managerState.study = 'all'; dashboard(); });
     $('#manager-study-filter')?.addEventListener('change', event => { managerState.study = event.target.value; dashboard(); });
   }
@@ -248,11 +260,12 @@
     return value;
   }
   function admin() {
+    const deleted = listTypes.admin === 'all' ? state.deleted : state.deleted.filter(ticket => requestType(ticket) === listTypes.admin);
     $('#view').innerHTML = `${header('Administración', 'Gestiona cuentas, responsables, tipologías y registros.', '<button class="secondary" data-action="new-user">Nuevo usuario</button>')}
-      <section class="metrics">${metric('PQR radicadas', state.tickets.length)}${metric('Abiertas', state.tickets.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', state.tickets.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section>
+      <section class="metrics">${metric('Solicitudes radicadas', state.tickets.length)}${metric('Abiertas', state.tickets.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', state.tickets.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section>
       <section class="grid2 staff-grid">${staffCard('validador', 'Analistas de PQR')}${staffCard('redigitador', 'Redigitadores')}</section>
       ${ticketTable(state.tickets, 'admin')}
-      ${state.deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${state.deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · PDV ${esc(ticket.pdv)} · ${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}
+      ${deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · ${ticket.pdv ? `PDV ${esc(ticket.pdv)} · ` : ''}${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}
       <section class="card accounts-card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Sin correos personales ni compartidos.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
       <section class="card tipologies-card"><div class="staff-heading"><div><h3>Tipologías</h3><p class="sub">Define el área sugerida para cada tipología. El analista podrá cambiarla en el dictamen.</p></div><span class="badge">${state.tips.length} registradas</span></div><div class="tipologies-grid">${state.tips.map(tip => `<div class="tipology-item"><strong>${esc(tip)}</strong><small>Área sugerida: ${esc(state.tipAreas[tip] || 'Sin sugerencia')}</small><div class="actions"><button class="secondary" data-action="edit-tip-area" data-tip="${esc(tip)}">Cambiar área</button><button class="ghost" data-action="delete-tip" data-tip="${esc(tip)}">Eliminar</button></div></div>`).join('')}</div><form id="tip-form" class="tip-add-form"><label>Nueva tipología<input name="name" placeholder="Nombre de la tipología" required maxlength="150"></label>${tipAreaFields('new-tip')}<button class="primary">Agregar tipología</button></form></section>`;
     const accounts = $('.accounts-card');
@@ -273,8 +286,10 @@
     }); };
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
-  function newTicket(direct) {
-    modal(direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid"><label>ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">Descripción<textarea name="description" required minlength="8"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
+  function newTicket(kind) {
+    const direct = kind === 'RDG';
+    const edition = kind === 'EDC';
+    modal(edition ? 'Solicitar edición de auditoría' : direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid">${edition ? '' : '<label>ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>'}<label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct || edition ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">${edition ? 'Motivo de la edición' : 'Descripción'}<textarea name="description" required minlength="8"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${edition ? 'Solicitar edición' : direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
     const form = $('#case-form');
     bindAttachmentSelection(form);
     form.elements.client.onchange = () => { const other = form.elements.client.value === 'Otros'; $('#other-client').classList.toggle('hide', !other); form.elements.clientOther.required = other; };
@@ -289,7 +304,7 @@
         delete payload.attachments;
         delete payload.clientOther;
         payload.client = form.elements.client.value === 'Otros' ? form.elements.clientOther.value.trim() : form.elements.client.value;
-        created = await action(direct ? 'direct_create' : 'create', null, payload);
+        created = kind === 'PQR' ? await action('create', null, payload) : await createSpecial(kind, payload);
         failures = await uploadAttachments(created, files, $('#upload-progress'));
       });
       if (created && failures.length) alert(`${created.code} se creó correctamente, pero no se pudieron cargar estos adjuntos: ${failures.join(', ')}. Abre Detalle para reintentarlo.`);
@@ -298,7 +313,7 @@
   function detail(ticket) {
     const events = ticket.timeline || [];
     const canAdd = state.me.role === 'comercial' && ticket.commercial === state.me.id && !ticket.deletedAt;
-    modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Cliente:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)} · <strong>PDV:</strong> ${esc(ticket.pdv)}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')} · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}</p><p><strong>Descripción:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
+    modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')} · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
     loadAttachments(ticket.id);
     if (canAdd) {
       const form = $('#add-attachments');
@@ -394,7 +409,7 @@
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_redigit', ticket.id, formData(form))); };
   }
   function redigit(ticket) {
-    modal(`Redigitar · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack"><label>Nuevo número de auditoría<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label><div class="actions"><button class="primary">${ticket.directRedigitation ? 'Registrar y cerrar' : 'Enviar a verificación'}</button></div></form>`);
+    modal(`${requestType(ticket) === 'EDC' ? 'Gestionar edición' : 'Redigitar'} · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack"><label>${requestType(ticket) === 'EDC' ? 'Número de auditoría editada' : 'Nuevo número de auditoría'}<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label><div class="actions"><button class="primary">${ticket.directRedigitation ? 'Registrar y cerrar' : 'Enviar a verificación'}</button></div></form>`);
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('redigit', ticket.id, formData(form))); };
   }
   function verify(ticket) {
@@ -452,6 +467,12 @@
     modal('Cambiar mi contraseña', '<form id="action-form" class="stack"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required><small>Mínimo 8 caracteres.</small></label><div class="actions"><button class="primary">Guardar contraseña</button></div></form>');
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.auth.updateUser({ password: formData(form).password }); if (error) throw error; }); };
   }
+  document.addEventListener('change', event => {
+    const role = event.target?.dataset?.typeFilter;
+    if (!role || role !== state.me?.role || !Object.hasOwn(listTypes, role)) return;
+    listTypes[role] = event.target.value;
+    renderView();
+  });
   document.addEventListener('click', async event => {
     const button = event.target.closest('[data-action]'); if (!button) return;
     const type = button.dataset.action; const ticket = [...state.tickets, ...state.deleted].find(item => item.id === button.dataset.id);
@@ -467,7 +488,7 @@
       }
       if (type === 'detail' && ticket) return detail(ticket);
       if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
-      if (type === 'new-ticket' || type === 'new-direct') return newTicket(type === 'new-direct');
+      if (type === 'new-ticket' || type === 'new-direct' || type === 'new-edit') return newTicket(type === 'new-ticket' ? 'PQR' : type === 'new-direct' ? 'RDG' : 'EDC');
       if (type === 'assign-validator' && ticket) return assignValidator(ticket);
       if (type === 'dictate' && ticket) return dictate(ticket);
       if (type === 'assign-redigit' && ticket) return assignRedigit(ticket);
@@ -498,7 +519,7 @@
       if (type === 'toggle-staff') { const person = [...state.staff.validators, ...state.staff.redigitators].find(item => item.id === button.dataset.person); const { error } = await db.rpc('pqr_admin_staff', { p_id: person.id, p_role: person.role, p_name: person.name, p_active: !person.active }); if (error) throw error; await load(); return; }
       if (type === 'delete-tip') { if (confirm(`¿Eliminar la tipología «${button.dataset.tip}»?`)) { const { error } = await db.rpc('pqr_admin_tip', { p_name: button.dataset.tip, p_delete: true }); if (error) throw error; await load(); } return; }
       if (state.me.role === 'gerente' && ['export-pdf', 'export-summary', 'export-cases'].includes(type)) {
-        const filter = managerState.view === 'details' ? managerState : { country: 'all', study: 'all' };
+        const filter = managerState.view === 'details' ? managerState : { country: 'all', study: 'all', type: managerState.type };
         const cases = PQRReports.filterTickets(state.tickets, filter);
         if (type === 'export-pdf') PQRReports.pdf(cases, state.users, state.staff, filter);
         if (type === 'export-summary') PQRReports.excelSummary(cases, state.users, state.staff);
