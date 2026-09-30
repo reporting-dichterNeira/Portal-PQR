@@ -6,6 +6,7 @@
   const db = window.supabase?.createClient(URL, KEY, { auth: { detectSessionInUrl: false } });
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const usernameKey = value => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const fmt = value => value ? new Date(value).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—';
   const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial' };
   const clients = ['KO tradicional', 'KO moderno', 'Lindley', 'P&G', 'CBC', 'Gloria', 'Heineken', 'Fifco', 'ABI', 'Otros'];
@@ -121,7 +122,13 @@
   }
   async function adminFunction(payload) {
     const { data, error } = await db.functions.invoke('pqr-admin', { body: payload });
-    if (error || data?.error) throw new Error(data?.error || error?.message || 'No se pudo guardar la cuenta.');
+    if (error) {
+      let detail;
+      try { detail = await error.context?.json(); } catch { /* La respuesta no siempre contiene JSON. */ }
+      console.error('Error de administración:', error, detail);
+      throw new Error(detail?.error || detail?.message || error.message || 'No se pudo guardar la cuenta.');
+    }
+    if (data?.error) throw new Error(data.error);
     return data;
   }
   async function load() {
@@ -155,7 +162,7 @@
     $('#login-form').onsubmit = async event => {
       event.preventDefault();
       const form = event.currentTarget;
-      const username = $('#username').value.trim().toLowerCase();
+      const username = usernameKey($('#username').value);
       if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) { $('#login-message').textContent = 'Escribe un usuario válido.'; return; }
       lock(form, true); $('#login-message').textContent = 'Ingresando…';
       const { error } = await db.auth.signInWithPassword({ email: `${username}@portal-pqr.invalid`, password: $('#password').value });
@@ -413,9 +420,14 @@
     }); };
   }
   function userForm(person) {
-    modal(person ? `Cuenta · ${person.name}` : 'Nuevo usuario', `<form id="action-form" class="stack"><label>Nombre<input name="name" required minlength="3" value="${esc(person?.name || '')}" ${person ? 'disabled' : ''}></label><label>Usuario<input name="username" required minlength="3" maxlength="32" autocomplete="username" value="${esc(person?.username || '')}"></label>${person ? '' : `<label>Rol<select name="role">${Object.entries(roles).filter(([role]) => role !== 'admin').map(([role, label]) => `<option value="${role}">${esc(label)}</option>`).join('')}</select></label>`}<label>${person ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input name="password" type="password" autocomplete="new-password" minlength="12" ${person ? '' : 'required'}><small>Mínimo 12 caracteres. No la compartas por correo.</small></label><div class="actions"><button class="primary">${person ? 'Guardar cambios' : 'Crear cuenta'}</button></div></form>`);
-    const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => {
+    modal(person ? `Cuenta · ${person.name}` : 'Nuevo usuario', `<form id="action-form" class="stack"><label>Nombre<input name="name" required minlength="3" value="${esc(person?.name || '')}" ${person ? 'disabled' : ''}></label><label>Usuario<input name="username" required minlength="3" maxlength="32" autocomplete="username" value="${esc(person?.username || '')}"><small>Se escribe sin tildes ni ñ; el portal las convierte automáticamente.</small></label>${person ? '' : `<label>Rol<select name="role">${Object.entries(roles).filter(([role]) => role !== 'admin').map(([role, label]) => `<option value="${role}">${esc(label)}</option>`).join('')}</select></label>`}<label>${person ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input name="password" type="password" autocomplete="new-password" minlength="8" ${person ? '' : 'required'}><small>Mínimo 8 caracteres. No la compartas por correo.</small></label><div class="actions"><button class="primary">${person ? 'Guardar cambios' : 'Crear cuenta'}</button></div></form>`);
+    const form = $('#action-form');
+    form.elements.username.addEventListener('blur', () => { form.elements.username.value = usernameKey(form.elements.username.value); });
+    form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => {
       const values = formData(form);
+      values.username = usernameKey(values.username);
+      form.elements.username.value = values.username;
+      if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(values.username)) throw new Error('El usuario debe tener entre 3 y 32 caracteres: letras sin tildes, números, punto, guion o guion bajo.');
       if (!person) await adminFunction({ action: 'create', ...values });
       else { if (values.username.trim().toLowerCase() !== person.username) await adminFunction({ action: 'rename', id: person.id, username: values.username }); if (values.password) await adminFunction({ action: 'set_password', id: person.id, password: values.password }); }
     }); };
@@ -437,7 +449,7 @@
     button.textContent = 'Copiado';
   }
   function passwordForm() {
-    modal('Cambiar mi contraseña', '<form id="action-form" class="stack"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="12" required></label><div class="actions"><button class="primary">Guardar contraseña</button></div></form>');
+    modal('Cambiar mi contraseña', '<form id="action-form" class="stack"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required><small>Mínimo 8 caracteres.</small></label><div class="actions"><button class="primary">Guardar contraseña</button></div></form>');
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.auth.updateUser({ password: formData(form).password }); if (error) throw error; }); };
   }
   document.addEventListener('click', async event => {

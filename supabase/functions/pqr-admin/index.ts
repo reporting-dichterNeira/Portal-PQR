@@ -48,7 +48,7 @@ Deno.serve(async (request) => {
   let input: Record<string, unknown>;
   try { input = await request.json(); } catch { return reply(origin, { error: 'Solicitud inválida' }, 400); }
   const action = String(input.action ?? '');
-  const username = String(input.username ?? '').trim().toLowerCase();
+  const username = String(input.username ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const name = String(input.name ?? '').trim();
   const role = String(input.role ?? '');
   const password = String(input.password ?? '');
@@ -57,7 +57,7 @@ Deno.serve(async (request) => {
 
   if (action === 'create') {
     if (!validUsername || name.length < 3 || !['admin', 'gerente', 'validador', 'redigitador', 'comercial'].includes(role)
-      || password.length < 12) return reply(origin, { error: 'Usuario, nombre, rol o contraseña inválidos' }, 400);
+      || password.length < 8) return reply(origin, { error: 'Usuario, nombre o rol inválidos, o contraseña con menos de 8 caracteres' }, 400);
     if (['validador', 'redigitador'].includes(role)) {
       const { data: existing } = await admin.from('pqr_profiles').select('id').eq('role', role).limit(1);
       if (existing?.length) return reply(origin, { error: 'Ya existe la cuenta compartida de esta área' }, 409);
@@ -96,7 +96,7 @@ Deno.serve(async (request) => {
     return reply(origin, error ? { error: error.message } : { ok: true }, error ? 400 : 200);
   }
   if (action === 'set_password') {
-    if (password.length < 12) return reply(origin, { error: 'La contraseña debe tener 12 caracteres o más' }, 400);
+    if (password.length < 8) return reply(origin, { error: 'La contraseña debe tener 8 caracteres o más' }, 400);
     const { error } = await admin.auth.admin.updateUserById(targetId, { password });
     return reply(origin, error ? { error: error.message } : { ok: true }, error ? 400 : 200);
   }
