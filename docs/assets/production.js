@@ -20,7 +20,7 @@
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
-  let state = { me: null, users: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
+  let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
   let busy = false;
 
   function showError(error) {
@@ -148,13 +148,14 @@
       db.from('pqr_tips').select('name,suggested_area').order('name'),
       db.from('pqr_tickets').select('id,deleted_at,data').order('created_at', { ascending: false }),
       db.from('pqr_notifications').select('*').order('created_at', { ascending: false }).limit(100),
+      db.from('pqr_contact_emails').select('profile_id,email').order('email'),
     ]);
     for (const result of queries) if (result.error) throw result.error;
-    const [profiles, staff, tips, cases, notifications] = queries.map(result => result.data);
+    const [profiles, staff, tips, cases, notifications, contactEmails] = queries.map(result => result.data);
     const me = profiles.find(person => person.id === session.session.user.id);
     if (!me?.active) { await db.auth.signOut(); state.me = null; renderLogin('Tu cuenta no está activa.'); return; }
     state = {
-      me, users: profiles,
+      me, users: profiles, contactEmails,
       staff: { validators: staff.filter(person => person.role === 'validador'), redigitators: staff.filter(person => person.role === 'redigitador') },
       tips: tips.map(item => item.name),
       tipAreas: Object.fromEntries(tips.map(item => [item.name, item.suggested_area || ''])),
@@ -196,7 +197,7 @@
     const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
     const filter = `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
-    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small></td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>Redigitación de ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
+    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small></td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
@@ -204,11 +205,11 @@
       let result = '';
       if (['Radicado', 'Reabierto', 'En Validación', 'Pendiente de Verificación'].includes(ticket.status)) result += `<button class="secondary" data-action="assign-validator" data-id="${ticket.id}">${ticket.validatorPersonId ? 'Reasignar' : 'Asignar'}</button>`;
       if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ['En Validación', 'Reabierto'].includes(ticket.status)) result += `<button class="primary" data-action="dictate" data-id="${ticket.id}">Dictaminar</button>`;
-      if (ticket.validatorPersonId && ticket.status === 'Pendiente de Verificación') result += `<button class="primary" data-action="verify" data-id="${ticket.id}">Verificar</button>`;
+      if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ticket.status === 'Pendiente de Verificación') result += `<button class="primary" data-action="verify" data-id="${ticket.id}">Verificar</button>`;
       if (requestType(ticket) === 'PQR' && ['Cerrado', 'No Aplica'].includes(ticket.status)) result += `<button class="danger" data-action="reopen" data-id="${ticket.id}">Reabrir</button>`;
       return result;
     }
-    if (role === 'redigitador' && ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)) return `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Asignar edición' : 'Asignar'}</button>${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Registrar edición' : 'Redigitar'}</button>` : ''}`;
+    if (role === 'redigitador' && (['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status) || (requestType(ticket) === 'EDC' && ticket.status === 'Pendiente de Verificación'))) return `${ticket.status !== 'Pendiente de Verificación' ? `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Asignar edición' : 'Asignar'}</button>` : ''}${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Confirmar edición' : 'Redigitar'}</button>` : ''}`;
     if (role === 'comercial' && ticket.status === 'Cerrado' && !ticket.feedback) return `<button class="secondary" data-action="feedback" data-id="${ticket.id}">Calificar</button>`;
     return '';
   }
@@ -217,12 +218,12 @@
     $('#view').innerHTML = `${header('Mis solicitudes', 'Radica PQR, redigitaciones o ediciones de auditoría.', '<button class="secondary" data-action="new-edit">Solicitar edición</button><button class="secondary" data-action="new-direct">Solicitar redigitación directa</button><button class="primary" data-action="new-ticket">Nueva PQR</button>')}<section class="metrics">${metric('Radicadas', cases.length)}${metric('En gestión', cases.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'comercial')}`;
   }
   function analyst() {
-    const cases = state.tickets.filter(ticket => requestType(ticket) !== 'RDG');
+    const cases = state.tickets.filter(ticket => requestType(ticket) === 'PQR');
     $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
   }
   function redigitator() {
     const cases = state.tickets.filter(ticket => ticket.redigitador === state.me.id);
-    $('#view').innerHTML = `${header('Bandeja de redigitación', 'Elige Campo o Validación, asigna a la persona y registra la nueva auditoría.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
+    $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
   }
   function dashboard() {
     $('#view').innerHTML = PQRReports.render(state.tickets, state.users, state.staff, managerState);
@@ -266,14 +267,14 @@
       <section class="grid2 staff-grid">${staffCard('validador', 'Analistas de PQR')}${staffCard('redigitador', 'Redigitadores')}</section>
       ${ticketTable(state.tickets, 'admin')}
       ${deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · ${ticket.pdv ? `PDV ${esc(ticket.pdv)} · ` : ''}${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}
-      <section class="card accounts-card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Sin correos personales ni compartidos.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
+      <section class="card accounts-card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Los correos de aviso son independientes y puedes asociar varios a cada cuenta compartida.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
       <section class="card tipologies-card"><div class="staff-heading"><div><h3>Tipologías</h3><p class="sub">Define el área sugerida para cada tipología. El analista podrá cambiarla en el dictamen.</p></div><span class="badge">${state.tips.length} registradas</span></div><div class="tipologies-grid">${state.tips.map(tip => `<div class="tipology-item"><strong>${esc(tip)}</strong><small>Área sugerida: ${esc(state.tipAreas[tip] || 'Sin sugerencia')}</small><div class="actions"><button class="secondary" data-action="edit-tip-area" data-tip="${esc(tip)}">Cambiar área</button><button class="ghost" data-action="delete-tip" data-tip="${esc(tip)}">Eliminar</button></div></div>`).join('')}</div><form id="tip-form" class="tip-add-form"><label>Nueva tipología<input name="name" placeholder="Nombre de la tipología" required maxlength="150"></label>${tipAreaFields('new-tip')}<button class="primary">Agregar tipología</button></form></section>`;
     const accounts = $('.accounts-card');
     accounts?.querySelectorAll('tbody tr').forEach((row, index) => {
       const person = state.users[index];
       const cell = row.lastElementChild;
       cell.classList.add('account-controls');
-      cell.insertAdjacentHTML('afterbegin', `<button class="secondary" data-action="credentials" data-id="${esc(person.id)}">Credenciales</button>`);
+      cell.insertAdjacentHTML('afterbegin', `<button class="secondary" data-action="contact-emails" data-id="${esc(person.id)}">Correos (${state.contactEmails.filter(item => item.profile_id === person.id).length})</button><button class="secondary" data-action="credentials" data-id="${esc(person.id)}">Credenciales</button>`);
     });
     const tipForm = $('#tip-form');
     bindTipAreaFields(tipForm, 'new-tip');
@@ -313,7 +314,7 @@
   function detail(ticket) {
     const events = ticket.timeline || [];
     const canAdd = state.me.role === 'comercial' && ticket.commercial === state.me.id && !ticket.deletedAt;
-    modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')} · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
+    modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')}${requestType(ticket) === 'EDC' ? '' : ` · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}`}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes && requestType(ticket) !== 'EDC' ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}${requestType(ticket) === 'EDC' && ticket.editCompleted !== undefined ? `<p><strong>¿Se editó?</strong> ${ticket.editCompleted ? 'Sí' : 'No'}<br><strong>Comentario:</strong> ${esc(ticket.editComment || '—')}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
     loadAttachments(ticket.id);
     if (canAdd) {
       const form = $('#add-attachments');
@@ -412,8 +413,9 @@
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_redigit', ticket.id, formData(form))); };
   }
   function redigit(ticket) {
-    modal(`${requestType(ticket) === 'EDC' ? 'Gestionar edición' : 'Redigitar'} · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack"><label>${requestType(ticket) === 'EDC' ? 'Número de auditoría editada' : 'Nuevo número de auditoría'}<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label><div class="actions"><button class="primary">${ticket.directRedigitation ? 'Registrar y cerrar' : 'Enviar a verificación'}</button></div></form>`);
-    const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('redigit', ticket.id, formData(form))); };
+    const edition = requestType(ticket) === 'EDC';
+    modal(`${edition ? 'Confirmar edición' : 'Redigitar'} · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack">${edition ? '<label>¿Se editó la auditoría?<select name="edited" required><option value="">Selecciona una respuesta</option><option value="yes">Sí, se editó</option><option value="no">No se editó</option></select></label><label>Comentario para Comercial<textarea name="comment" minlength="5" required></textarea></label>' : '<label>Nuevo número de auditoría<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label>'}<div class="actions"><button class="primary">${edition ? 'Finalizar y avisar a Comercial' : ticket.directRedigitation ? 'Registrar y cerrar' : 'Enviar a verificación'}</button></div></form>`);
+    const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action(edition ? 'edit_complete' : 'redigit', ticket.id, formData(form))); };
   }
   function verify(ticket) {
     modal(`Verificar · ${ticket.code}`, `<div class="case-result"><p><strong>Nueva auditoría:</strong> ${esc(ticket.audit || '—')}</p><p>${esc(ticket.redigitNotes || '')}</p></div><form id="action-form" class="stack"><label>Resultado<select name="ok"><option value="yes">Aprobar y cerrar</option><option value="no">Devolver a redigitación</option></select></label><label>Comentario<textarea name="comment" minlength="5" required></textarea></label><div class="actions"><button class="primary">Confirmar resultado</button></div></form>`);
@@ -448,6 +450,17 @@
       if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(values.username)) throw new Error('El usuario debe tener entre 3 y 32 caracteres: letras sin tildes, números, punto, guion o guion bajo.');
       if (!person) await adminFunction({ action: 'create', ...values });
       else { if (values.username.trim().toLowerCase() !== person.username) await adminFunction({ action: 'rename', id: person.id, username: values.username }); if (values.password) await adminFunction({ action: 'set_password', id: person.id, password: values.password }); }
+    }); };
+  }
+  function contactEmails(person) {
+    if (!person) return;
+    const addresses = state.contactEmails.filter(item => item.profile_id === person.id);
+    modal(`Correos de aviso · @${person.username}`, `<p class="sub">Puedes vincular varios correos a esta cuenta compartida. Solo se usan para avisos; el ingreso continúa con usuario y contraseña.</p><div class="list">${addresses.length ? addresses.map(item => `<div class="list-item staff-item"><span>${esc(item.email)}</span><button class="danger" data-action="remove-contact-email" data-id="${esc(person.id)}" data-email="${esc(item.email)}">Quitar</button></div>`).join('') : '<p class="empty">Sin correos de aviso. Los eventos quedarán pendientes hasta que añadas uno.</p>'}</div><form id="contact-email-form" class="stack"><label>Añadir correo<input name="email" type="email" required maxlength="254" autocomplete="off" placeholder="nombre@empresa.com"></label><button class="primary">Añadir correo</button></form>`);
+    const form = $('#contact-email-form');
+    form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => {
+      const email = form.elements.email.value.trim().toLowerCase();
+      const { error } = await db.from('pqr_contact_emails').insert({ profile_id: person.id, email });
+      if (error) throw error;
     }); };
   }
   function credentials(person, temporaryPassword = '') {
@@ -504,6 +517,13 @@
       if (type === 'new-user') return userForm(null);
       if (type === 'manager-view' && state.me.role === 'gerente') { managerState.view = button.dataset.managerView; dashboard(); return; }
       if (type === 'credentials' && state.me.role === 'admin') return credentials(state.users.find(person => person.id === button.dataset.id));
+      if (type === 'contact-emails' && state.me.role === 'admin') return contactEmails(state.users.find(person => person.id === button.dataset.id));
+      if (type === 'remove-contact-email' && state.me.role === 'admin') {
+        if (!confirm(`¿Quitar ${button.dataset.email} de los avisos?`)) return;
+        const { error } = await db.from('pqr_contact_emails').delete().eq('profile_id', button.dataset.id).eq('email', button.dataset.email);
+        if (error) throw error;
+        closeModal(); await load(); return;
+      }
       if (type === 'copy-username' && state.me.role === 'admin') return await copyCredential('#credential-username', button);
       if (type === 'copy-temp-password' && state.me.role === 'admin') return await copyCredential('#credential-password', button);
       if (type === 'reset-credential' && state.me.role === 'admin') {
