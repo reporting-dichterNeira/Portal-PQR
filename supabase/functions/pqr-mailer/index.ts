@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
 import nodemailer from 'npm:nodemailer@10.0.12';
 
-const sender = 'reportingdichter@gmail.com';
+const sender = 'reporting.dichterneira@gmail.com';
 const portalUrl = 'https://reporting-dichterneira.github.io/Portal-PQR/';
 const projectUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
