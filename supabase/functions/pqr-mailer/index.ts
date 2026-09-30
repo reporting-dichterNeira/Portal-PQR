@@ -98,6 +98,15 @@ Deno.serve(async request => {
     return new Response('No autorizado', { status: 401 });
   }
   if (!db || !gmailPassword) return new Response('Faltan secretos del servidor', { status: 503 });
+  const payload = await request.json().catch(() => ({}));
+  if (payload.action === 'verify_smtp') {
+    try {
+      await transport.verify();
+      return Response.json({ smtp: 'ready', sender });
+    } catch {
+      return Response.json({ error: 'Gmail rechazó la conexión. Revisa la contraseña de aplicación.' }, { status: 502 });
+    }
+  }
   const due = new Date().toISOString();
   const stale = new Date(Date.now() - 10 * 60_000).toISOString();
   const [{ data: pending, error: pendingError }, { data: interrupted, error: interruptedError }] = await Promise.all([
