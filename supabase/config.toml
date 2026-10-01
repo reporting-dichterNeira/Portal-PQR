@@ -1,0 +1,7 @@
+# Autenticación propia dentro de cada función, no la comprobación JWT heredada.
+[functions.pqr-admin]
+verify_jwt = false
+
+# Endpoint exclusivo del programador: exige x-pqr-mailer-token.
+[functions.pqr-mailer]
+verify_jwt = false
