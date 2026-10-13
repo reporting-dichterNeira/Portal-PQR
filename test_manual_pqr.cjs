@@ -25,7 +25,7 @@ function portal(role = 'validador', users) {
     modal: (title, html) => dialogs.push({ title, html }),
     attachmentField: () => '<input name="attachments" type="file" multiple>',
     bindAttachmentSelection: () => {}, checkedAttachments: () => [{ name: 'foto.png' }, { name: 'datos.xlsx' }],
-    formData: () => ({ pdv: '00123', commercialName: 'María Pérez', source: 'Correo', description: 'Solicitud recibida por correo', clientOther: 'extra', attachments: 'fake' }),
+    formData: () => ({ pdv: '00123', commercialName: 'María Pérez', description: 'Solicitud recibida por correo', clientOther: 'extra', attachments: 'fake' }),
     submit: async (_form, task) => task(),
     uploadAttachments: async (ticket, files) => { uploads.push({ ticket, files }); return []; },
     showError: error => errors.push(error.message),
@@ -50,12 +50,13 @@ for (const role of ['validador', 'gerente']) {
     assert.match(html, /Comercial asociado \(opcional\)<input name="commercialName"/);
     assert.doesNotMatch(html, /name="commercialId"/);
     assert.doesNotMatch(html, /name="commercialName"[^>]*required/);
-    assert.match(html, /Canal de recepción/);
+    assert.doesNotMatch(html, /Canal de recepción|name="source"/);
     assert.match(html, /data-numeric required maxlength="80"/);
     assert.match(html, /type="file" multiple/);
     await p.form.onsubmit({ preventDefault() {} });
     assert.equal(p.calls[0].name, 'pqr_create_manual');
     assert.equal(p.calls[0].p_data.commercialName, 'María Pérez');
+    assert.equal(p.calls[0].p_data.source, 'Otro');
     assert.ok(!('commercialId' in p.calls[0].p_data));
     assert.equal(p.calls[0].p_data.client, 'Estudio especial');
     assert.equal(p.calls[0].p_data.pdv, '00123');
@@ -84,7 +85,7 @@ test('Comercial conserva radicación propia; otros roles no pueden abrir el form
 
 test('sin cuentas Comerciales permite abrir y radicar sin nombre', async () => {
   const p = portal('gerente', []);
-  p.context.formData = () => ({pdv:'00123',source:'Correo',description:'Solicitud externa sin comercial',commercialName:''});
+  p.context.formData = () => ({pdv:'00123',description:'Solicitud externa sin comercial',commercialName:''});
   vm.runInContext('newTicket("PQR", true)', p.context);
   assert.equal(p.dialogs.length, 1);
   await p.form.onsubmit({preventDefault(){}});
