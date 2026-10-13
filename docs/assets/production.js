@@ -36,7 +36,7 @@
     if (status) status.textContent = message;
     else alert(message);
   }
-  function badge(status) { const kind = ['Cerrado', 'No Aplica'].includes(status) ? 'ok' : ['Reabierto', 'Devuelto'].includes(status) ? 'danger' : 'warn'; return `<span class="badge ${kind}">${esc(status)}</span>`; }
+  function badge(status) { const kind = ['Cerrado', 'No Aplica'].includes(status) ? 'ok' : ['Reabierto', 'Devuelto'].includes(status) ? 'danger' : 'warn'; return `<span class="badge ${kind}">${esc(PQRReports.statusLabel(status))}</span>`; }
   function metric(label, value) { return `<div class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`; }
   function header(title, subtitle, actions = '') { return `<div class="topline"><div><h1>${esc(title)}</h1><p class="sub">${esc(subtitle)}</p></div><div class="actions">${actions}</div></div>`; }
   function staffName(role, id) { return state.staff[role === 'validador' ? 'validators' : 'redigitators'].find(person => person.id === id)?.name || ''; }
