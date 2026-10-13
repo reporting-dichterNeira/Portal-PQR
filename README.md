@@ -14,6 +14,8 @@ Comercial radica → Analistas de PQR asignan y dictaminan → cierre justificad
 
 Los ID de PDV y auditoría se validan como dígitos. La trazabilidad de cada etapa y su hora quedan en el detalle del ticket y en columnas del Excel. Las bandejas operativas muestran el plazo SLA de 24 horas.
 
+Analistas de PQR y Gerencia pueden usar **Nueva PQR manual** para registrar solicitudes recibidas por correo, teléfono u otro canal. Deben seleccionar una cuenta de Comercial activa, ID de PDV, estudio, país y descripción; los adjuntos son opcionales. Se genera un radicado PQR en estado Radicado y continúa el flujo normal de asignación, dictamen, redigitación si aplica y cierre. El Comercial seleccionado ve el caso y recibe los avisos y la respuesta. El creador y el canal quedan en el detalle y el historial; Gerencia no adquiere permisos para dictaminar. El creador manual puede reintentar sus adjuntos desde Detalle.
+
 ## Arquitectura y despliegue
 
 - `docs/`: frontend estático servido por GitHub Pages.

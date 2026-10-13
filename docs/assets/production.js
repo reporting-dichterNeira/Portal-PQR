@@ -20,6 +20,12 @@
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
+  const manualPqrRoles = ['validador', 'gerente'];
+  const canCreateManualPqr = () => manualPqrRoles.includes(state.me?.role);
+  const canAddAttachments = ticket => !ticket.deletedAt && (
+    (state.me.role === 'comercial' && ticket.commercial === state.me.id) ||
+    (canCreateManualPqr() && ticket.manualEntry === true && ticket.createdBy === state.me.id)
+  );
   let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
   let busy = false;
 
@@ -128,6 +134,11 @@
     if (error) throw error;
     return data;
   }
+  async function createManualPqr(payload) {
+    const { data, error } = await db.rpc('pqr_create_manual', { p_data: payload });
+    if (error) throw error;
+    return data;
+  }
   async function adminFunction(payload) {
     const { data, error } = await db.functions.invoke('pqr-admin', { body: payload });
     if (error) {
@@ -219,7 +230,7 @@
   }
   function analyst() {
     const cases = state.tickets.filter(ticket => requestType(ticket) === 'PQR');
-    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
   }
   function redigitator() {
     const cases = state.tickets.filter(ticket => ticket.redigitador === state.me.id);
@@ -227,6 +238,7 @@
   }
   function dashboard() {
     $('#view').innerHTML = PQRReports.render(state.tickets, state.users, state.staff, managerState);
+    $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
     $('#dashboard-status-filter')?.addEventListener('change', event => {
       let count = 0;
       document.querySelectorAll('[data-case-status]').forEach(row => { row.hidden = event.target.value !== 'all' && row.dataset.caseStatus !== event.target.value; if (!row.hidden) count++; });
@@ -287,10 +299,14 @@
     }); };
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
-  function newTicket(kind) {
+  function newTicket(kind, manual = false) {
+    if (manual ? !canCreateManualPqr() || kind !== 'PQR' : state.me.role !== 'comercial') return;
     const direct = kind === 'RDG';
     const edition = kind === 'EDC';
-    modal(edition ? 'Solicitar edición de auditoría' : direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid">${edition ? '' : '<label>ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>'}<label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct || edition ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">${edition ? 'Motivo de la edición' : 'Descripción'}<textarea name="description" required minlength="8"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${edition ? 'Solicitar edición' : direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
+    const commercialAccounts = state.users.filter(person => person.role === 'comercial' && person.active);
+    if (manual && !commercialAccounts.length) { showError(new Error('No hay cuentas de Comercial activas. Administración debe crear o activar una para recibir la respuesta.')); return; }
+    const manualFields = manual ? `<p class="full sub">Registra una solicitud recibida fuera del portal. Se enviará a la bandeja de Analistas de PQR y seguirá el flujo normal; la respuesta llegará al comercial seleccionado.</p><label>Comercial asociado<select name="commercialId" required><option value="" disabled selected>Selecciona el comercial</option>${commercialAccounts.map(person => `<option value="${esc(person.id)}">${esc(person.name)} · @${esc(person.username)}</option>`).join('')}</select></label><label>Canal de recepción<select name="source" required>${['Correo', 'Teléfono', 'Otro'].map(source => `<option value="${source}">${source}</option>`).join('')}</select></label>` : '';
+    modal(manual ? 'Nueva PQR manual' : edition ? 'Solicitar edición de auditoría' : direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid">${manualFields}${edition ? '' : '<label>ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required maxlength="80"></label>'}<label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct || edition ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">${edition ? 'Motivo de la edición' : 'Descripción'}<textarea name="description" required minlength="8" maxlength="12000"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${edition ? 'Solicitar edición' : direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
     const form = $('#case-form');
     bindAttachmentSelection(form);
     form.elements.client.onchange = () => { const other = form.elements.client.value === 'Otros'; $('#other-client').classList.toggle('hide', !other); form.elements.clientOther.required = other; };
@@ -305,7 +321,7 @@
         delete payload.attachments;
         delete payload.clientOther;
         payload.client = form.elements.client.value === 'Otros' ? form.elements.clientOther.value.trim() : form.elements.client.value;
-        created = kind === 'PQR' ? await action('create', null, payload) : await createSpecial(kind, payload);
+        created = manual ? await createManualPqr(payload) : kind === 'PQR' ? await action('create', null, payload) : await createSpecial(kind, payload);
         failures = await uploadAttachments(created, files, $('#upload-progress'));
       });
       if (created && failures.length) alert(`${created.code} se creó correctamente, pero no se pudieron cargar estos adjuntos: ${failures.join(', ')}. Abre Detalle para reintentarlo.`);
@@ -313,9 +329,10 @@
   }
   function detail(ticket) {
     const events = ticket.timeline || [];
-    const canAdd = state.me.role === 'comercial' && ticket.commercial === state.me.id && !ticket.deletedAt;
+    const canAdd = canAddAttachments(ticket);
     modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')}${requestType(ticket) === 'EDC' ? '' : ` · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}`}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes && requestType(ticket) !== 'EDC' ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}${requestType(ticket) === 'EDC' && ticket.editCompleted !== undefined ? `<p><strong>¿Se editó?</strong> ${ticket.editCompleted ? 'Sí' : 'No'}<br><strong>Comentario:</strong> ${esc(ticket.editComment || '—')}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
     loadAttachments(ticket.id);
+    if (ticket.manualEntry) $('.case-result')?.insertAdjacentHTML('beforeend', `<p><strong>Radicación manual:</strong> ${esc(ticket.source || 'Otro')} · <strong>Registrada por:</strong> ${esc(ticket.createdByName || accountName(ticket.createdBy))}<br><strong>Comercial asociado:</strong> ${esc(accountName(ticket.commercial))}</p>`);
     if (canAdd) {
       const form = $('#add-attachments');
       bindAttachmentSelection(form);
@@ -505,6 +522,7 @@
       if (type === 'detail' && ticket) return detail(ticket);
       if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
       if (type === 'new-ticket' || type === 'new-direct' || type === 'new-edit') return newTicket(type === 'new-ticket' ? 'PQR' : type === 'new-direct' ? 'RDG' : 'EDC');
+      if (type === 'new-manual-pqr' && canCreateManualPqr()) return newTicket('PQR', true);
       if (type === 'assign-validator' && ticket) return assignValidator(ticket);
       if (type === 'dictate' && ticket) return dictate(ticket);
       if (type === 'assign-redigit' && ticket) return assignRedigit(ticket);
