@@ -25,7 +25,7 @@ function portal(role = 'validador', users) {
     modal: (title, html) => dialogs.push({ title, html }),
     attachmentField: () => '<input name="attachments" type="file" multiple>',
     bindAttachmentSelection: () => {}, checkedAttachments: () => [{ name: 'foto.png' }, { name: 'datos.xlsx' }],
-    formData: () => ({ pdv: '00123', commercialId: 'commercial', source: 'Correo', description: 'Solicitud recibida por correo', clientOther: 'extra', attachments: 'fake' }),
+    formData: () => ({ pdv: '00123', commercialName: 'María Pérez', source: 'Correo', description: 'Solicitud recibida por correo', clientOther: 'extra', attachments: 'fake' }),
     submit: async (_form, task) => task(),
     uploadAttachments: async (ticket, files) => { uploads.push({ ticket, files }); return []; },
     showError: error => errors.push(error.message),
@@ -41,20 +41,22 @@ function portal(role = 'validador', users) {
 }
 
 for (const role of ['validador', 'gerente']) {
-  test(`${role}: radica para Comercial, con trazabilidad y varios adjuntos`, async () => {
+  test(`${role}: radica con nombre comercial opcional, trazabilidad y varios adjuntos`, async () => {
     const p = portal(role);
     vm.runInContext('newTicket("PQR", true)', p.context);
     const { html, title } = p.dialogs[0];
     assert.equal(title, 'Nueva PQR manual');
     assert.match(html, /Comercial asociado/);
-    assert.match(html, /Cuenta Comercial · @comercial/);
-    assert.doesNotMatch(html, /value="inactive"/);
+    assert.match(html, /Comercial asociado \(opcional\)<input name="commercialName"/);
+    assert.doesNotMatch(html, /name="commercialId"/);
+    assert.doesNotMatch(html, /name="commercialName"[^>]*required/);
     assert.match(html, /Canal de recepción/);
     assert.match(html, /data-numeric required maxlength="80"/);
     assert.match(html, /type="file" multiple/);
     await p.form.onsubmit({ preventDefault() {} });
     assert.equal(p.calls[0].name, 'pqr_create_manual');
-    assert.equal(p.calls[0].p_data.commercialId, 'commercial');
+    assert.equal(p.calls[0].p_data.commercialName, 'María Pérez');
+    assert.ok(!('commercialId' in p.calls[0].p_data));
     assert.equal(p.calls[0].p_data.client, 'Estudio especial');
     assert.equal(p.calls[0].p_data.pdv, '00123');
     assert.ok(!('clientOther' in p.calls[0].p_data));
@@ -80,12 +82,14 @@ test('Comercial conserva radicación propia; otros roles no pueden abrir el form
   assert.equal(analyst.dialogs.length, 0);
 });
 
-test('sin Comercial activo se informa el requisito y no se crea nada', () => {
+test('sin cuentas Comerciales permite abrir y radicar sin nombre', async () => {
   const p = portal('gerente', []);
+  p.context.formData = () => ({pdv:'00123',source:'Correo',description:'Solicitud externa sin comercial',commercialName:''});
   vm.runInContext('newTicket("PQR", true)', p.context);
-  assert.equal(p.dialogs.length, 0);
-  assert.match(p.errors[0], /No hay cuentas de Comercial activas/);
-  assert.equal(p.calls.length, 0);
+  assert.equal(p.dialogs.length, 1);
+  await p.form.onsubmit({preventDefault(){}});
+  assert.equal(p.errors.length, 0);
+  assert.equal(p.calls[0].p_data.commercialName, '');
 });
 
 test('botón manual en Analistas y en ambas hojas de Gerencia', () => {
@@ -118,9 +122,26 @@ test('adjuntos solo para Comercial titular o creador manual con rol válido', ()
   assert.equal(vm.runInContext('canAddAttachments(ticket)', p.context), true);
 });
 
-test('nombres comerciales se escapan antes de mostrarse', () => {
+test('el campo libre no interpola nombres de cuentas registradas', () => {
   const p = portal('validador', [{ id: 'c', name: '<script>', username: 'c"', role: 'comercial', active: true }]);
   vm.runInContext('newTicket("PQR", true)', p.context);
-  assert.match(p.dialogs[0].html, /&lt;script&gt;/);
+  assert.match(p.dialogs[0].html, /name="commercialName"/);
   assert.doesNotMatch(p.dialogs[0].html, /<script>/);
+});
+
+test('Excel conserva el nombre libre, el vacío y los comerciales de casos anteriores', () => {
+  let exported;
+  const XLSX = { utils: { book_new: () => ({}), aoa_to_sheet: rows => { exported = rows; return {}; }, book_append_sheet() {}, encode_col: () => 'Z' }, writeFile() {} };
+  const context = vm.createContext({ window: {XLSX}, XLSX, Date, Intl, Set, Map });
+  vm.runInContext(fs.readFileSync('docs/assets/reports.js','utf8'), context);
+  context.window.PQRReports.excelCases([
+    {code:'PQR-1',commercialName:'María externa'},
+    {code:'PQR-2',commercialName:''},
+    {code:'PQR-3',commercial:'c'},
+    {code:'PQR-4',commercialName:'=SUM(A1:A2)'},
+  ], [{id:'c',name:'Comercial anterior'}]);
+  assert.equal(exported[1][3], 'María externa');
+  assert.equal(exported[2][3], 'No indicado');
+  assert.equal(exported[3][3], 'Comercial anterior');
+  assert.equal(exported[4][3], "'=SUM(A1:A2)");
 });

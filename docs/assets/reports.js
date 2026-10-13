@@ -160,11 +160,11 @@ window.PQRReports = (() => {
     const excelDate=value=>{if(!value)return '';const result=new Date(value);return Number.isNaN(result.getTime())?'':result};
     const clean=value=>{if(value instanceof Date)return value;const text=String(value??'');return /^[=+\-@]/.test(text)?`'${text}`:text};
     const personName=(role,personId)=>staff[role]?.find(p=>p.id===personId)?.name||'';
-    const commercialName=userId=>users.find(account=>account.id===userId)?.name||'Cuenta anterior';
+    const commercialName=t=>t.commercialName||(t.commercial?(users.find(account=>account.id===t.commercial)?.name||'Cuenta anterior'):'No indicado');
     const rows=tickets.map(t=>{
       const events=(Array.isArray(t.timeline)?t.timeline:[]).slice().sort((a,b)=>new Date(a.at)-new Date(b.at));
       const history=Array.from({length:maxEvents},(_,i)=>{const item=events[i];return item?[item.action,excelDate(item.at),item.actor,item.detail]:['','','','']}).flat();
-    return [requestLabels[requestType(t)],t.code,excelDate(t.createdAt),commercialName(t.commercial),t.pdv,t.client,t.country,t.description,t.status,t.applies,t.tipology,t.area,personName('validators',t.validatorPersonId),t.redigitType,t.fieldRedigitatorName||personName('redigitators',t.redigitatorPersonId),t.auditOriginal,t.audit,t.response,t.verifyComment,excelDate(t.closedAt),t.support,t.redigitNotes,t.feedback?(t.feedback.ok?'Sí':'No'):'',t.feedback?.comment,...history].map(clean);
+    return [requestLabels[requestType(t)],t.code,excelDate(t.createdAt),commercialName(t),t.pdv,t.client,t.country,t.description,t.status,t.applies,t.tipology,t.area,personName('validators',t.validatorPersonId),t.redigitType,t.fieldRedigitatorName||personName('redigitators',t.redigitatorPersonId),t.auditOriginal,t.audit,t.response,t.verifyComment,excelDate(t.closedAt),t.support,t.redigitNotes,t.feedback?(t.feedback.ok?'Sí':'No'):'',t.feedback?.comment,...history].map(clean);
     });
     const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([headers,...rows],{cellDates:true,dateNF:'dd/mm/yyyy hh:mm:ss'});
     ws['!cols']=headers.map(header=>({wch:header.includes('detalle')||['Descripción','Respuesta','Verificación final','Notas de redigitación','Comentario de retroalimentación'].includes(header)?55:header.includes('fecha')||header.includes('hora')?23:header.includes('responsable')?30:header==='Radicado'?23:header==='ID PDV'||header.includes('auditoría')?21:20}));
