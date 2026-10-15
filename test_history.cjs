@@ -21,7 +21,7 @@ test('corrección manual tiene procedencia y no muta la fuente ni simula un cruc
  const original=h.normalize(source,[]),lookup={loaded:true,entries:{123:{rows:[]}}};
  const t=h.resolve(original,lookup,{patch:{client:'KO tradicional',auditCity:'Lima',reviewed:true},updated_at:'2026-10-15',reason:'Fuente confirmada'});
  assert.equal(original.client,'KO');assert.equal(t.client,'KO tradicional');assert.equal(t.auditData.ciudad,'Lima');assert.equal(t.matchStatus,'not_found');assert.equal(t.hasManualData,true);
- assert.ok(t.dataIssues.some(i=>i.includes('Auditor')));assert.ok(!t.dataIssues.includes('Sin datos'));
+ assert.equal(t.dataIssues.length,0);assert.ok(!t.dataIssues.includes('Sin datos'));
  assert.equal(h.resolve(original,lookup,{patch:{auditOriginal:'456'}}).auditOriginal,'456');
 });
 test('filtros globales combinan origen, país, estudio, mes, estado y analista en ambas hojas',()=>{
@@ -75,4 +75,33 @@ test('el exportador real produce XLSX válido, conserva IDs como texto y procede
  const book=real.read(binary,{type:'buffer'}),[headers,values]=real.utils.sheet_to_json(book.Sheets.Casos,{header:1});
  assert.equal(values[headers.indexOf('ID PDV')],'0012');assert.equal(values[headers.indexOf('ID auditoría')],'123');
  assert.equal(values[headers.indexOf('Origen')],'Histórico (Excel)');assert.equal(values[headers.indexOf('Mes de auditoría')],'2026-09');
+});
+test('pendientes solo por ID: no convierte falta de región o cruce en una tarea',()=>{
+ const original=h.normalize(source,[]);
+ for(const lookup of [{},{loaded:true,entries:{123:{rows:[]}}},{loaded:true,entries:{123:{rows:[{...row,region:null,ciudad:null,Validador:null}]}}}]){
+   const t=h.resolve(original,lookup);assert.equal(t.dataIssues.length,0);
+   assert.ok(!h.pending([t]).includes('data-action="complete-data"'));
+ }
+ const missing=h.resolve({...original,auditOriginal:''},{},{patch:{reviewed:true}});
+ assert.equal(missing.dataIssues[0],'Sin ID de auditoría');
+ const invalid=h.resolve({...original,auditOriginal:'AUD_123'},{});assert.equal(invalid.dataIssues[0],'ID de auditoría inválido');
+});
+test('plataforma abierta no aparece; al cerrar solo aparece si le falta el ID',()=>{
+ const base={...h.normalize(source,[]),origin:'platform',auditOriginal:''};
+ for(const status of ['Radicado','En Validación','En revisión','Reabierto','Pendiente de Redigitación','Pendiente de Verificación'])assert.equal(h.resolve({...base,status},{}).dataIssues.length,0);
+ for(const status of ['Cerrado','No Aplica'])assert.equal(h.resolve({...base,status},{}).dataIssues.length,1);
+ assert.equal(h.resolve({...base,status:'Cerrado',auditOriginal:'123'},{loaded:true,entries:{123:{rows:[]}}}).dataIssues.length,0);
+});
+test('KO moderno Chile no requiere cruce ni entra en pendientes, pero el ticket se conserva',()=>{
+ const t=h.resolve({...h.normalize(source,[]),country:'Chile',client:'KO moderno',auditOriginal:''},{});
+ assert.equal(t.dataIssues.length,0);assert.equal(context.window.PQRAudits.match(t,{}).status,'excluded');
+ const stats=context.window.PQRAudits.stats([t],{});assert.equal(stats.total,1);assert.equal(stats.excluded,1);assert.equal(stats.notFound,0);
+ assert.equal(r.summarize([t]).total,1);assert.ok(r.render([t],[],{},{}).includes(t.code));
+ assert.equal(h.resolve({...t,country:'Perú'},{}).dataIssues.length,1);
+ assert.equal(h.resolve({...t,client:'KO tradicional'},{}).dataIssues.length,1);
+ const excel=h.resolve({...t,client:'KO',auditFallback:{canal:'MODERNO'}},{});assert.equal(excel.dataIssues.length,0);
+});
+test('normalización crea un radicado del mes correcto, no reutiliza septiembre',()=>{
+ assert.match(h.normalize(source,[{...row,Ola:'JUL 2026'}]).code,/^PQR-HIS-2026-07-/);
+ assert.match(h.normalize(source,[{...row,Ola:'AGO 2026'}]).code,/^PQR-HIS-2026-08-/);
 });

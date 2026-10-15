@@ -31,7 +31,7 @@ window.PQRHistory = (() => {
     if(text(v['ID de auditoría'])&&!audit)flags.push('ID de auditoría del Excel no numérico o no interpretable');
     const status=['cerrado','resuelto'].includes(norm(v.Status))?'Cerrado':norm(v.Status)==='abierto'?'En revisión':'Sin estado';
     return {
-      origin:'historical',requestType:'PQR',code:`PQR-HIS-2026-09-${record.row}`,sourceRow:record.row,sourceId:text(v.ID),
+      origin:'historical',requestType:'PQR',code:`PQR-HIS-${month(unique?.Ola)||sourceMonth(v)||'SIN-MES'}-${record.row}`,sourceRow:record.row,sourceId:text(v.ID),
       auditOriginal:audit,audit:'',pdv:unique?id(unique.ID_de_PDV)||id(v['ID PDV']):id(v['ID PDV']),
       country:country(unique?.pais||v['País campo']),client:study(unique?.Survey||v.Estudio),
       reportingMonth:month(unique?.Ola)||sourceMonth(v),monthSource:month(unique?.Ola)?'Databricks':'Excel',excelMonth:text(v.Mes),
@@ -61,18 +61,17 @@ window.PQRHistory = (() => {
     t.hasManualData=Object.keys(patch).length>0;t.correction=correction||null;
     t.matchStatus=m?.status||'pending';
     t.dataIssues=[];
-    if(m?.status!=='found'&&!patch.reviewed)t.dataIssues.push(m?.label||'Sin cruce');
-    for(const [field,label] of [['country','País'],['client','Estudio'],['reportingMonth','Mes'],['pdv','ID PDV'],['analystName','Analista'],['tipology','Tipificación'],['area','Área'],['applies','Procede']])if(!text(t[field]))t.dataIssues.push(`${label} sin información`);
-    if(t.origin==='platform'&&t.validatorPersonId)t.dataIssues=t.dataIssues.filter(v=>!v.startsWith('Analista'));
-    for(const [field,label] of [['nombre_usuario','Auditor'],['Validador','Validador de auditoría'],['ciudad','Ciudad'],['region','Región']])if(!text(t.auditData[field]))t.dataIssues.push(`${label} sin información`);
-    if(!patch.reviewed)t.dataIssues.push(...(t.qualityFlags||[]));
-    if(norm(t.client)==='ko')t.dataIssues.push('Estudio genérico KO: especificar tradicional o moderno');
+    const closed=['Cerrado','No Aplica'].includes(t.status);
+    // This worksheet is an actionable ID queue, not a source-completeness audit.
+    if((t.origin==='historical'||closed)&&!window.PQRAudits?.integrationExcluded(t)&&!id(t.auditOriginal)){
+      t.dataIssues.push(text(t.auditOriginal)?'ID de auditoría inválido':'Sin ID de auditoría');
+    }
     if(patch.analystName)t.validatorPersonId=`reported:${patch.analystName}`;
     return t;
   }
   function pending(tickets) {
     const list=tickets.filter(t=>t.dataIssues?.length);
-    return `<section class="card"><h2>Datos por completar</h2><p class="sub">${list.length} casos con cruce pendiente o información incompleta. Las correcciones son solo para indicadores: conservan el Excel, Databricks y el flujo operativo originales. Un caso completado manualmente no se presenta como cruce de Databricks.</p><div class="table-wrap"><table class="table"><thead><tr><th>Radicado / origen</th><th>País / estudio</th><th>Mes</th><th>Información pendiente</th><th>Acción</th></tr></thead><tbody>${list.map(t=>`<tr><td>${esc(t.code)}<small>${t.origin==='historical'?`Excel · fila ${t.sourceRow}`:'Plataforma'}</small></td><td>${esc(t.country)}<small>${esc(t.client)}</small></td><td>${esc(t.reportingMonth||'Sin mes')}</td><td>${esc(t.dataIssues.join(' · '))}</td><td><button class="secondary" data-action="complete-data" data-id="${esc(t.id)}">Completar datos</button></td></tr>`).join('')||'<tr><td colspan="5">No hay datos pendientes en esta selección.</td></tr>'}</tbody></table></div></section>`;
+    return `<section class="card"><h2>Datos por completar</h2><p class="sub">${list.length} casos pendientes por ID de auditoría faltante o inválido. No se incluyen solicitudes de plataforma aún abiertas, ni KO moderno de Chile. Tener un ID válido sin cruce, región u otros datos de Databricks no requiere completar este listado. Los tickets permanecen en los indicadores generales.</p><div class="table-wrap"><table class="table"><thead><tr><th>Radicado / origen</th><th>País / estudio</th><th>Mes</th><th>Información pendiente</th><th>Acción</th></tr></thead><tbody>${list.map(t=>`<tr><td>${esc(t.code)}<small>${t.origin==='historical'?`Excel · fila ${t.sourceRow}`:'Plataforma'}</small></td><td>${esc(t.country)}<small>${esc(t.client)}</small></td><td>${esc(t.reportingMonth||'Sin mes')}</td><td>${esc(t.dataIssues.join(' · '))}</td><td><button class="secondary" data-action="complete-data" data-id="${esc(t.id)}">Completar datos</button></td></tr>`).join('')||'<tr><td colspan="5">No hay IDs de auditoría pendientes en esta selección.</td></tr>'}</tbody></table></div></section>`;
   }
   return {text,norm,id,month,study,country,sourceMonth,auditCandidate,normalize,editable,resolve,pending};
 })();

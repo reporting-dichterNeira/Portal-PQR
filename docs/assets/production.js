@@ -42,7 +42,7 @@
     auditLookup.loading = true; auditLookup.error = '';
     // One authorized representative per new audit ID; empty IDs need no API call.
     const requested=new Set();
-    tickets=tickets.filter(t=>{const ids=[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)].filter(Boolean);if(!ids.some(id=>!requested.has(id)))return false;ids.forEach(id=>requested.add(id));return true;});
+    tickets=tickets.filter(t=>{if(window.PQRAudits.integrationExcluded(t))return false;const ids=[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)].filter(Boolean);if(!ids.some(id=>!requested.has(id)))return false;ids.forEach(id=>requested.add(id));return true;});
     if(state.me.role==='gerente')dashboard();
     try {
       for (let offset = 0; offset < tickets.length; offset += 50) {
@@ -302,12 +302,11 @@
     const h=window.PQRHistory, old=state.overrides.find(o=>o.case_id===ticket.id);
     const fieldValue=key=>({auditAuditor:ticket.auditData?.nombre_usuario,auditValidator:ticket.auditData?.Validador,auditCity:ticket.auditData?.ciudad,auditRegion:ticket.auditData?.region})[key]??ticket[key]??'';
     const fields=h.editable.filter(([key])=>key!=='auditOriginal'||ticket.origin==='historical');
-    modal(`Completar datos · ${ticket.code}`,`<p class="sub">Solo cambia indicadores; no modifica el Excel ni el trámite original. Deja el valor actual si no tienes una corrección confirmada.</p><form id="reporting-form" class="form-grid">${fields.map(([key,label])=>`<label>${esc(label)}${key==='applies'?`<select name="${key}"><option value="">Sin dato</option>${['Aplica','No Aplica'].map(v=>`<option ${fieldValue(key)===v?'selected':''}>${v}</option>`).join('')}</select>`:`<input name="${key}" value="${esc(fieldValue(key))}" maxlength="300" ${key==='reportingMonth'?'type="month"':key==='pdv'||key==='auditOriginal'?'inputmode="numeric" data-numeric pattern="[0-9]{1,30}"':''}>`}</label>`).join('')}<label class="full"><span><input class="inline-check" name="reviewed" type="checkbox" ${old?.patch.reviewed?'checked':''}> He revisado la falta de cruce y las advertencias del Excel</span><small>Las carencias de campos seguirán apareciendo hasta completarlas. No cambia el resultado del cruce de Databricks.</small></label><label class="full">Motivo de la corrección<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><div class="actions full"><button class="primary" type="submit">Guardar datos de indicadores</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
+    modal(`Completar datos · ${ticket.code}`,`<p class="sub">Solo cambia indicadores; no modifica el Excel ni el trámite original. Deja el valor actual si no tienes una corrección confirmada.</p><form id="reporting-form" class="form-grid">${fields.map(([key,label])=>`<label>${esc(label)}${key==='applies'?`<select name="${key}"><option value="">Sin dato</option>${['Aplica','No Aplica'].map(v=>`<option ${fieldValue(key)===v?'selected':''}>${v}</option>`).join('')}</select>`:`<input name="${key}" value="${esc(fieldValue(key))}" maxlength="300" ${key==='reportingMonth'?'type="month"':key==='pdv'||key==='auditOriginal'?'inputmode="numeric" data-numeric pattern="[0-9]{1,30}"':''}>`}</label>`).join('')}<label class="full">Motivo de la corrección<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><div class="actions full"><button class="primary" type="submit">Guardar datos de indicadores</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
     const form=$('#reporting-form');form.onsubmit=async event=>{
       event.preventDefault();await submit(form,async()=>{
         const values=formData(form),patch={...(old?.patch||{})};
         for(const [key] of fields){const value=String(values[key]||'').trim();if(value!==String(fieldValue(key)))patch[key]=value;}
-        patch.reviewed=form.elements.reviewed.checked;
         if((patch.pdv&&!/^\d{1,30}$/.test(patch.pdv))||(patch.auditOriginal&&!/^\d{1,30}$/.test(patch.auditOriginal)))throw Error('Los IDs deben contener solo números.');
         const payload={patch,reason:values.reason.trim()};
         const result=old?await db.from('pqr_case_overrides').update(payload).eq('case_id',ticket.id).eq('updated_at',old.updated_at).select('case_id'):await db.from('pqr_case_overrides').insert({...payload,case_id:ticket.id,source:ticket.origin}).select('case_id');
