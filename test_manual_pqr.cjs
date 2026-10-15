@@ -16,7 +16,7 @@ function portal(role = 'validador', users) {
     { id: 'creator', name: 'Analistas', username: 'analistas', role, active: true },
   ], tickets: [], staff: {} };
   const context = vm.createContext({
-    state, managerState: {},
+    state, managerState: {}, auditLookup: undefined,
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
     clients: ['KO tradicional', 'Otros'], countries: ['Colombia'],
     $: selector => selector === '#case-form' ? form : selector === '#view' ? view : selector === '.export-actions' ? exports : null,

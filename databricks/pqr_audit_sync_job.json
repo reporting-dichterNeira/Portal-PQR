@@ -1,0 +1,20 @@
+{
+  "name": "Portal PQR · Auditorías · Reporting Cluster",
+  "max_concurrent_runs": 1,
+  "timeout_seconds": 1800,
+  "schedule": {
+    "quartz_cron_expression": "0 0 6,14 * * ?",
+    "timezone_id": "America/Bogota",
+    "pause_status": "PAUSED"
+  },
+  "tasks": [{
+    "task_key": "sync_pqr_audits",
+    "existing_cluster_id": "1115-192254-jqnbpmi",
+    "timeout_seconds": 1800,
+    "max_retries": 0,
+    "notebook_task": {
+      "notebook_path": "/Users/masanchez@dichter-neira.com/portal-pqr-audit-sync",
+      "source": "WORKSPACE"
+    }
+  }]
+}

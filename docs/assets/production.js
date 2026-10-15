@@ -28,6 +28,36 @@
   );
   let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
   let busy = false;
+  let auditLookup = window.PQRAudits?.empty();
+  let auditLookupOwner = null;
+
+  async function refreshAudits(tickets = state.tickets) {
+    if (auditLookup.loading || !['gerente','admin'].includes(state.me?.role)) return;
+    const owner = state.me.id;
+    auditLookup.loading = true; auditLookup.error = '';
+    try {
+      for (let offset = 0; offset < tickets.length; offset += 50) {
+        auditLookup.progress = `Consultando solicitudes ${offset + 1} a ${Math.min(offset + 50,tickets.length)} de ${tickets.length}…`;
+        if (state.me?.role === 'gerente') dashboard();
+        const {data,error} = await db.functions.invoke('pqr-audits',{body:{ticketIds:tickets.slice(offset,offset+50).map(ticket=>ticket.id)}});
+        if (state.me?.id !== owner) return;
+        if (error) {
+          let detail; try { detail = await error.context?.json(); } catch { /* No siempre hay JSON. */ }
+          throw new Error(detail?.error || data?.error || 'No se pudieron consultar las auditorías. Reintenta más tarde.');
+        }
+        if (data?.error) throw new Error(data.error);
+        if (!data?.entries || data.source !== 'scheduled') throw new Error('El corte sincronizado no es válido.');
+        const ids = tickets.slice(offset,offset+50).flatMap(ticket=>[window.PQRAudits.id(ticket.auditOriginal),window.PQRAudits.id(ticket.audit)]).filter(Boolean);
+        for (const id of ids) delete auditLookup.entries[id];
+        Object.assign(auditLookup.entries,data.entries);
+        const dates = Object.values(auditLookup.entries).map(entry=>Date.parse(entry.at)).filter(Number.isFinite);
+        auditLookup.checkedAt = dates.length?new Date(Math.min(...dates)).toISOString():null;
+        auditLookup.loaded = true;
+      }
+    } catch (error) { if (state.me?.id === owner) auditLookup.error = error.message; }
+    finally { if (state.me?.id === owner) { auditLookup.loading = false; if(state.me.role==='gerente') dashboard(); } }
+  }
+
 
   function showError(error) {
     const message = error?.message || String(error) || 'No se pudo completar la operación.';
@@ -174,9 +204,13 @@
       deleted: cases.filter(item => item.deleted_at).map(item => ({ ...item.data, deletedAt: item.deleted_at })),
       notifications,
     };
+    if (auditLookupOwner !== me.id) { auditLookup = window.PQRAudits?.empty(); auditLookupOwner = me.id; }
     renderApp();
+    // This reads Supabase only; opening Gerencia never wakes Reporting Cluster.
+    if (me.role === 'gerente' && auditLookup && !auditLookup.loaded) await refreshAudits();
   }
   function renderLogin(message = '') {
+    auditLookup = window.PQRAudits?.empty(); auditLookupOwner = null;
     $('#app').innerHTML = $('#login-template').innerHTML;
     if (message) $('#login-message').textContent = message;
     $('#login-form').onsubmit = async event => {
@@ -237,7 +271,7 @@
     $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
   }
   function dashboard() {
-    $('#view').innerHTML = PQRReports.render(state.tickets, state.users, state.staff, managerState);
+    $('#view').innerHTML = PQRReports.render(state.tickets, state.users, state.staff, { ...managerState, auditLookup });
     $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
     $('#dashboard-status-filter')?.addEventListener('change', event => {
       let count = 0;
@@ -519,6 +553,12 @@
         return;
       }
       if (type === 'detail' && ticket) return detail(ticket);
+      if (state.me.role === 'gerente' && type === 'refresh-audits') return await refreshAudits();
+      if (state.me.role === 'gerente' && type === 'audit-detail' && ticket) return modal(`Auditoría · ${ticket.code}`, window.PQRAudits.detail(ticket,auditLookup));
+      if (state.me.role === 'gerente' && type === 'load-ticket-audit' && ticket) {
+        await refreshAudits([ticket]);
+        return modal(`Auditoría · ${ticket.code}`, window.PQRAudits.detail(ticket,auditLookup));
+      }
       if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
       if (type === 'new-ticket' || type === 'new-direct' || type === 'new-edit') return newTicket(type === 'new-ticket' ? 'PQR' : type === 'new-direct' ? 'RDG' : 'EDC');
       if (type === 'new-manual-pqr' && canCreateManualPqr()) return newTicket('PQR', true);

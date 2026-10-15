@@ -5,3 +5,10 @@ verify_jwt = false
 # Endpoint exclusivo del programador: exige x-pqr-mailer-token.
 [functions.pqr-mailer]
 verify_jwt = false
+
+# Session-gated cache reader; separate receiver authenticates its own secret.
+[functions.pqr-audits]
+verify_jwt = false
+
+[functions.pqr-audit-sync]
+verify_jwt = false
