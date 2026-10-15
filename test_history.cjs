@@ -67,3 +67,12 @@ test('un mismo analista no se duplica por tener PQR históricas y de plataforma'
  const stats=context.window.PQRAudits.stats([{...historical,auditData:{}}],{loaded:true,entries:{123:{rows:[]}}});
  assert.equal(stats.auditors.length,0);assert.equal(stats.cities.length,0);
 });
+test('el exportador real produce XLSX válido, conserva IDs como texto y procedencia',()=>{
+ const real=require('./docs/assets/vendor/xlsx.full.min.js');let binary;
+ const XLSX={...real,writeFile:book=>{binary=real.write(book,{type:'buffer',bookType:'xlsx'});}};
+ const ctx=vm.createContext({window:{XLSX},XLSX});vm.runInContext(fs.readFileSync('docs/assets/reports.js','utf8'),ctx);
+ ctx.window.PQRReports.excelCases([h.resolve(h.normalize(source,[]),{})]);
+ const book=real.read(binary,{type:'buffer'}),[headers,values]=real.utils.sheet_to_json(book.Sheets.Casos,{header:1});
+ assert.equal(values[headers.indexOf('ID PDV')],'0012');assert.equal(values[headers.indexOf('ID auditoría')],'123');
+ assert.equal(values[headers.indexOf('Origen')],'Histórico (Excel)');assert.equal(values[headers.indexOf('Mes de auditoría')],'2026-09');
+});

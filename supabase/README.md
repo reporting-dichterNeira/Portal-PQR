@@ -24,7 +24,7 @@ Para verificar Gmail sin mandar correos, invocar la función desde el servidor c
 
 `20261015204849_pqr_historical_reporting.sql` separa `pqr_historical_cases` de los tickets operativos. Solo Gerencia y Administración pueden leerlo. El archivo de origen y sus filas no se publican en GitHub: `source_hash`, hoja, fila, ID original y valores de origen quedan en Supabase, bajo RLS. No se crean cuentas, notificaciones, correos ni secuencias operativas al importar.
 
-La primera carga contiene 1.438 PQR cerradas de `BASE REQUERIDA PQR KO`: septiembre según Ola de Databricks (617), y mes del Excel cuando no cruza (821). La hoja `borrador` no se importa. Se consulta toda la base antes de seleccionar el mes; no se filtra por fecha de radicación. Cada fila conserva un UUID determinista y un radicado `PQR-HIS-2026-09-<fila>`. No se deduplica por ID de auditoría, pues varias reclamaciones pueden corresponder a una auditoría. Se descartan únicamente filas idénticas, dejando un manifiesto local; esta carga no tenía duplicados exactos seleccionados.
+La carga inicial selecciona PQR cerradas de `BASE REQUERIDA PQR KO`: septiembre según Ola de Databricks, y mes del Excel cuando no cruza. Los conteos y el manifiesto de cada importación se conservan de forma privada, no como datos publicados del sitio. La hoja `borrador` no se importa. Se consulta toda la base antes de seleccionar el mes; no se filtra por fecha de radicación. Cada fila conserva un UUID determinista y un radicado `PQR-HIS-2026-09-<fila>`. No se deduplica por ID de auditoría, pues varias reclamaciones pueden corresponder a una auditoría. Se descartan únicamente filas idénticas, dejando constancia en el manifiesto local.
 
 Preparación local, con Python del runtime y `openpyxl`, solo lectura:
 
