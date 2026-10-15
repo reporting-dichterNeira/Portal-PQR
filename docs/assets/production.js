@@ -16,7 +16,7 @@
   const attachmentBucket = 'pqr-adjuntos';
   const maxAttachmentBytes = 10 * 1024 * 1024;
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-  const managerState = { view: 'overview', country: 'all', study: 'all', type: 'all' };
+  const managerState = { view: 'overview', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
@@ -26,12 +26,13 @@
     (state.me.role === 'comercial' && ticket.commercial === state.me.id) ||
     (canCreateManualPqr() && ticket.manualEntry === true && ticket.createdBy === state.me.id)
   );
-  let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], deleted: [], notifications: [] };
+  let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], historical: [], overrides: [], deleted: [], notifications: [] };
   let busy = false;
   let auditLookup = window.PQRAudits?.empty();
   let auditLookupOwner = null;
 
-  async function refreshAudits(tickets = state.tickets) {
+  const managerTickets = () => [...state.tickets,...state.historical].map(t=>window.PQRHistory.resolve(t,auditLookup,state.overrides.find(o=>o.case_id===t.id)));
+  async function refreshAudits(tickets = managerTickets()) {
     if (auditLookup.loading || !['gerente','admin'].includes(state.me?.role)) return;
     const owner = state.me.id;
     auditLookup.loading = true; auditLookup.error = '';
@@ -39,7 +40,8 @@
       for (let offset = 0; offset < tickets.length; offset += 50) {
         auditLookup.progress = `Consultando solicitudes ${offset + 1} a ${Math.min(offset + 50,tickets.length)} de ${tickets.length}…`;
         if (state.me?.role === 'gerente') dashboard();
-        const {data,error} = await db.functions.invoke('pqr-audits',{body:{ticketIds:tickets.slice(offset,offset+50).map(ticket=>ticket.id)}});
+        const batch=tickets.slice(offset,offset+50);
+        const {data,error} = await db.functions.invoke('pqr-audits',{body:{ticketIds:batch.filter(t=>t.origin!=='historical').map(t=>t.id),historicalIds:batch.filter(t=>t.origin==='historical').map(t=>t.id)}});
         if (state.me?.id !== owner) return;
         if (error) {
           let detail; try { detail = await error.context?.json(); } catch { /* No siempre hay JSON. */ }
@@ -195,6 +197,9 @@
     const [profiles, staff, tips, cases, notifications, contactEmails] = queries.map(result => result.data);
     const me = profiles.find(person => person.id === session.session.user.id);
     if (!me?.active) { await db.auth.signOut(); state.me = null; renderLogin('Tu cuenta no está activa.'); return; }
+    const reporting = ['gerente','admin'].includes(me.role);
+    const historical = reporting ? await readAll('pqr_historical_cases','id,data') : [];
+    const overrides = reporting ? await readAll('pqr_case_overrides','case_id,source,patch,reason,updated_at,updated_by,history','case_id') : [];
     state = {
       me, users: profiles, contactEmails,
       staff: { validators: staff.filter(person => person.role === 'validador'), redigitators: staff.filter(person => person.role === 'redigitador') },
@@ -202,12 +207,21 @@
       tipAreas: Object.fromEntries(tips.map(item => [item.name, item.suggested_area || ''])),
       tickets: cases.filter(item => !item.deleted_at).map(item => item.data),
       deleted: cases.filter(item => item.deleted_at).map(item => ({ ...item.data, deletedAt: item.deleted_at })),
-      notifications,
+      notifications, historical:historical.map(row=>row.data), overrides,
     };
     if (auditLookupOwner !== me.id) { auditLookup = window.PQRAudits?.empty(); auditLookupOwner = me.id; }
     renderApp();
     // This reads Supabase only; opening Gerencia never wakes Reporting Cluster.
     if (me.role === 'gerente' && auditLookup && !auditLookup.loaded) await refreshAudits();
+  }
+  async function readAll(table,columns,key='id') {
+    const rows=[];
+    for(let offset=0;;offset+=500){
+      const {data,error}=await db.from(table).select(columns).order(key).range(offset,offset+499);
+      if(error)throw error;
+      rows.push(...data);
+      if(data.length<500)return rows;
+    }
   }
   function renderLogin(message = '') {
     auditLookup = window.PQRAudits?.empty(); auditLookupOwner = null;
@@ -271,16 +285,26 @@
     $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
   }
   function dashboard() {
-    $('#view').innerHTML = PQRReports.render(state.tickets, state.users, state.staff, { ...managerState, auditLookup });
+    $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup });
     $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
-    $('#dashboard-status-filter')?.addEventListener('change', event => {
-      let count = 0;
-      document.querySelectorAll('[data-case-status]').forEach(row => { row.hidden = event.target.value !== 'all' && row.dataset.caseStatus !== event.target.value; if (!row.hidden) count++; });
-      const label = $('#dashboard-filter-count'); if (label) label.textContent = `${count} de ${document.querySelectorAll('[data-case-status]').length} casos`;
-    });
-    $('#manager-type-filter')?.addEventListener('change', event => { managerState.type = event.target.value; dashboard(); });
-    $('#manager-country-filter')?.addEventListener('change', event => { managerState.country = event.target.value; managerState.study = 'all'; dashboard(); });
-    $('#manager-study-filter')?.addEventListener('change', event => { managerState.study = event.target.value; dashboard(); });
+    for(const key of ['type','country','study','month','origin','status','analyst'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
+  }
+  function completeData(ticket) {
+    const h=window.PQRHistory, old=state.overrides.find(o=>o.case_id===ticket.id);
+    const fieldValue=key=>({auditAuditor:ticket.auditData?.nombre_usuario,auditValidator:ticket.auditData?.Validador,auditCity:ticket.auditData?.ciudad,auditRegion:ticket.auditData?.region})[key]??ticket[key]??'';
+    const fields=h.editable.filter(([key])=>key!=='auditOriginal'||ticket.origin==='historical');
+    modal(`Completar datos · ${ticket.code}`,`<p class="sub">Solo cambia indicadores; no modifica el Excel ni el trámite original. Deja el valor actual si no tienes una corrección confirmada.</p><form id="reporting-form" class="form-grid">${fields.map(([key,label])=>`<label>${esc(label)}${key==='applies'?`<select name="${key}"><option value="">Sin dato</option>${['Aplica','No Aplica'].map(v=>`<option ${fieldValue(key)===v?'selected':''}>${v}</option>`).join('')}</select>`:`<input name="${key}" value="${esc(fieldValue(key))}" maxlength="300" ${key==='reportingMonth'?'type="month"':key==='pdv'||key==='auditOriginal'?'inputmode="numeric" data-numeric pattern="[0-9]{1,30}"':''}>`}</label>`).join('')}<label class="full"><span><input class="inline-check" name="reviewed" type="checkbox" ${old?.patch.reviewed?'checked':''}> He revisado la falta de cruce y las advertencias del Excel</span><small>Las carencias de campos seguirán apareciendo hasta completarlas. No cambia el resultado del cruce de Databricks.</small></label><label class="full">Motivo de la corrección<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><div class="actions full"><button class="primary" type="submit">Guardar datos de indicadores</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
+    const form=$('#reporting-form');form.onsubmit=async event=>{
+      event.preventDefault();await submit(form,async()=>{
+        const values=formData(form),patch={...(old?.patch||{})};
+        for(const [key] of fields){const value=String(values[key]||'').trim();if(value!==String(fieldValue(key)))patch[key]=value;}
+        patch.reviewed=form.elements.reviewed.checked;
+        if((patch.pdv&&!/^\d{1,30}$/.test(patch.pdv))||(patch.auditOriginal&&!/^\d{1,30}$/.test(patch.auditOriginal)))throw Error('Los IDs deben contener solo números.');
+        const payload={patch,reason:values.reason.trim()};
+        const result=old?await db.from('pqr_case_overrides').update(payload).eq('case_id',ticket.id).eq('updated_at',old.updated_at).select('case_id'):await db.from('pqr_case_overrides').insert({...payload,case_id:ticket.id,source:ticket.origin}).select('case_id');
+        if(result.error)throw result.error;if(result.data?.length!==1)throw Error('Otro usuario actualizó este registro. Recarga antes de corregirlo.');
+      });
+    };
   }
   function staffCard(role, title) {
     const people = state.staff[role === 'validador' ? 'validators' : 'redigitators'];
@@ -542,6 +566,7 @@
   document.addEventListener('click', async event => {
     const button = event.target.closest('[data-action]'); if (!button) return;
     const type = button.dataset.action; const ticket = [...state.tickets, ...state.deleted].find(item => item.id === button.dataset.id);
+    const reportTicket = state.me?.role==='gerente'?managerTickets().find(item=>item.id===button.dataset.id):null;
     try {
       if (type === 'close') return closeModal();
       if (type === 'logout') { await db.auth.signOut(); state.me = null; return renderLogin(); }
@@ -554,10 +579,12 @@
       }
       if (type === 'detail' && ticket) return detail(ticket);
       if (state.me.role === 'gerente' && type === 'refresh-audits') return await refreshAudits();
-      if (state.me.role === 'gerente' && type === 'audit-detail' && ticket) return modal(`Auditoría · ${ticket.code}`, window.PQRAudits.detail(ticket,auditLookup));
-      if (state.me.role === 'gerente' && type === 'load-ticket-audit' && ticket) {
-        await refreshAudits([ticket]);
-        return modal(`Auditoría · ${ticket.code}`, window.PQRAudits.detail(ticket,auditLookup));
+      if (type==='complete-data'&&reportTicket)return completeData(reportTicket);
+      if (type==='reset-manager-filters'&&state.me.role==='gerente'){for(const key of Object.keys(managerState))if(key!=='view')managerState[key]='all';return dashboard();}
+      if (state.me.role === 'gerente' && type === 'audit-detail' && reportTicket) return modal(`Auditoría · ${reportTicket.code}`, window.PQRAudits.detail(reportTicket,auditLookup));
+      if (state.me.role === 'gerente' && type === 'load-ticket-audit' && reportTicket) {
+        await refreshAudits([reportTicket]);
+        return modal(`Auditoría · ${reportTicket.code}`, window.PQRAudits.detail(managerTickets().find(t=>t.id===reportTicket.id),auditLookup));
       }
       if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
       if (type === 'new-ticket' || type === 'new-direct' || type === 'new-edit') return newTicket(type === 'new-ticket' ? 'PQR' : type === 'new-direct' ? 'RDG' : 'EDC');
@@ -599,10 +626,11 @@
       if (type === 'toggle-staff') { const person = [...state.staff.validators, ...state.staff.redigitators].find(item => item.id === button.dataset.person); const { error } = await db.rpc('pqr_admin_staff', { p_id: person.id, p_role: person.role, p_name: person.name, p_active: !person.active }); if (error) throw error; await load(); return; }
       if (type === 'delete-tip') { if (confirm(`¿Eliminar la tipología «${button.dataset.tip}»?`)) { const { error } = await db.rpc('pqr_admin_tip', { p_name: button.dataset.tip, p_delete: true }); if (error) throw error; await load(); } return; }
       if (state.me.role === 'gerente' && ['export-pdf', 'export-summary', 'export-cases'].includes(type)) {
-        const filter = managerState.view === 'details' ? managerState : { country: 'all', study: 'all', type: managerState.type };
-        const cases = PQRReports.filterTickets(state.tickets, filter);
+        const filter = managerState;
+        let cases = PQRReports.filterTickets(managerTickets(), filter);
+        if(filter.view==='pending')cases=cases.filter(t=>t.dataIssues.length);
         if (type === 'export-pdf') PQRReports.pdf(cases, state.users, state.staff, filter);
-        if (type === 'export-summary') PQRReports.excelSummary(cases, state.users, state.staff);
+        if (type === 'export-summary') PQRReports.excelSummary(cases, state.users, state.staff,filter);
         if (type === 'export-cases') PQRReports.excelCases(cases, state.users, state.staff);
       }
     } catch (error) { showError(error); }

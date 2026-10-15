@@ -37,7 +37,7 @@ test('rankings por original, no por nueva; excluyen RDG/EDC y cuentan PQR sin mu
   const s=audits.stats([t,{...t,id:'another'},{...t,requestType:'RDG'},{...t,requestType:'EDC'}],lookup);
   assert.equal(s.total,2);assert.equal(s.found,2);
   assert.equal(s.auditors[0].name,'Auditor A');assert.equal(s.auditors[0].count,2);assert.equal(s.auditors[0].audits,1);
-  assert.equal(s.validators[0].name,'Validador X');assert.equal(s.cities[0].name,'LIMA · Peru');
+  assert.equal(s.validators[0].name,'Validador X');assert.equal(s.cities[0].name,'LIMA · Perú');
 });
 test('detalles de ambas auditorías, botones en ambas hojas y HTML seguro',()=>{
   const detail=audits.detail(t,lookup);
@@ -85,10 +85,10 @@ test('error y timeout cancelan el comando y liberan el contexto',async()=>{
   }
 });
 
-function endpoint({role='gerente',active=true,available=true,validSession=true,queryError=false,pending=false}={}){
+function endpoint({role='gerente',active=true,available=true,validSession=true,queryError=false,pending=false,historical=true}={}){
   let handler;const queries=[];
   const client={auth:{getUser:async()=>({data:{user:validSession?{id:'user'}:null}})},from:table=>{
-    const builder={select:()=>builder,eq:()=>builder,in:(_key,ids)=>{queries.push(ids);return table==='pqr_audit_cache'?Promise.resolve({data:pending?[]:[{audit_id:'123',records:[],checked_at:at}],error:queryError?{}:null}):builder;},is:async()=>({data:available?[{id:t.id,data:t}]:[]}),single:async()=>({data:{role,active}})};
+    const builder={select:()=>builder,eq:()=>builder,in:(_key,ids)=>{queries.push(ids);return table==='pqr_audit_cache'?Promise.resolve({data:pending?[]:[{audit_id:'123',records:[],checked_at:at}],error:queryError?{}:null}):table==='pqr_historical_cases'?Promise.resolve({data:historical?[{id:t.id,data:t}]:[],error:null}):table==='pqr_case_overrides'?Promise.resolve({data:[],error:null}):builder;},is:async()=>({data:available?[{id:t.id,data:t}]:[]}),single:async()=>({data:{role,active}})};
     return builder;
   }};
   const context=vm.createContext({Response,Request,Date,Map,Set,console,createClient:()=>client,
@@ -113,4 +113,10 @@ test('endpoint: exige sesión activa y rol gerencia/admin; no permite consultas 
   const pending=await (await endpoint({pending:true}).invoke()).json();assert.deepEqual(pending.entries,{});assert.equal(pending.checkedAt,null);
   const failed=await endpoint({queryError:true}).invoke();assert.equal(failed.status,503);assert.ok(!(await failed.json()).entries);
   assert.equal(audits.match(t,{...audits.empty(),loaded:true}).label,'Pendiente de sincronización');
+});
+test('endpoint verifica los IDs históricos bajo RLS, nunca acepta un ID de auditoría arbitrario',async()=>{
+ assert.equal((await endpoint().invoke({historicalIds:[t.id]})).status,200);
+ assert.equal((await endpoint({historical:false}).invoke({historicalIds:[t.id]})).status,403);
+ assert.equal((await endpoint().invoke({historicalIds:['123']})).status,400);
+ assert.equal((await endpoint().invoke({historicalIds:Array(51).fill(t.id)})).status,400);
 });

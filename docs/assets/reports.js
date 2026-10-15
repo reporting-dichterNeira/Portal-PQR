@@ -17,7 +17,7 @@ window.PQRReports = (() => {
     }
     return [...counts].map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name,'es'));
   };
-  const filterTickets = (tickets,filters={}) => tickets.filter(t => (filters.country==='all'||!filters.country||t.country===filters.country) && (filters.study==='all'||!filters.study||t.client===filters.study) && (filters.type==='all'||!filters.type||requestType(t)===filters.type));
+  const filterTickets = (tickets,filters={}) => tickets.filter(t => Object.entries({country:t.country,study:t.client,month:t.reportingMonth||String(t.createdAt||'').slice(0,7),origin:t.origin||'platform',status:t.status,analyst:t.analystName||t.validatorPersonId||'',type:requestType(t)}).every(([key,value])=>!filters[key]||filters[key]==='all'||filters[key]===value));
   const breakdown = (tickets,field) => group(tickets,field).map(({name})=>{
     const own=tickets.filter(t=>String(t[field]||'Sin clasificar').trim()===name);
     const closed=own.filter(t=>closedStatuses.has(t.status)).length;
@@ -35,14 +35,14 @@ window.PQRReports = (() => {
     const noAplica=decided.filter(t=>t.applies==='No Aplica').length;
     const closed=tickets.filter(t=>closedStatuses.has(t.status));
     const open=tickets.length-closed.length;
-    const closureHours=closed.filter(t=>t.createdAt&&t.closedAt).map(t=>(new Date(t.closedAt)-new Date(t.createdAt))/36e5).filter(x=>Number.isFinite(x)&&x>=0);
+    const closureHours=closed.filter(t=>t.timingComplete!==false&&t.createdAt&&t.closedAt).map(t=>(new Date(t.closedAt)-new Date(t.createdAt))/36e5).filter(x=>Number.isFinite(x)&&x>=0);
     const avgClosure=closureHours.length ? Math.round(closureHours.reduce((a,b)=>a+b,0)/closureHours.length*10)/10 : null;
     const knownValidators=staff.validators||[];
     const validatorIds=new Set([...knownValidators.map(p=>p.id),...tickets.map(t=>t.validatorPersonId).filter(Boolean)]);
     const validators=[...validatorIds].map(personId=>{
       const own=tickets.filter(t=>t.validatorPersonId===personId);
       const person=knownValidators.find(p=>p.id===personId);
-      return {name:person?.name||'Responsable histórico',active:person?.active!==false,assigned:own.length,decided:own.filter(t=>t.applies).length,closed:own.filter(t=>closedStatuses.has(t.status)).length};
+      return {name:person?.name||own.find(t=>t.analystName)?.analystName||'Responsable histórico',active:person?person.active!==false:null,assigned:own.length,decided:own.filter(t=>t.applies).length,closed:own.filter(t=>closedStatuses.has(t.status)).length};
     }).sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name,'es'));
     const knownRedigitators=staff.redigitators||[];
     const redigitatorIds=new Set([...knownRedigitators.map(p=>p.id),...tickets.map(t=>t.redigitatorPersonId).filter(Boolean)]);
@@ -56,7 +56,7 @@ window.PQRReports = (() => {
       redigit:tickets.filter(t=>['Pendiente de Redigitación','Devuelto'].includes(t.status)).length,
       verification:tickets.filter(t=>t.status==='Pendiente de Verificación').length,
       redigitRequired:tickets.filter(t=>t.redigitAssignedAt).length,
-      adjudicable:decided.filter(t=>t.area).length,
+      adjudicable:decided.filter(t=>t.area&&!/^(no\s*aplica|n\/?a)$/i.test(t.area.trim())).length,
       avgClosure,tipologies:group(decided,'tipology'),areas:group(decided,'area'),
       statuses:group(tickets,'status'),countries:group(tickets,'country'),studies:group(tickets,'client'),
       direct:tickets.filter(t=>t.directRedigitation).length,fieldRedigit:tickets.filter(t=>t.redigitType==='Campo').length,
@@ -81,9 +81,8 @@ window.PQRReports = (() => {
     return `<div class="table-wrap"><table class="table detail-table"><thead><tr><th>Segmento</th><th>Solicitudes</th><th>Abiertas</th><th>Cerradas</th><th>% cierre</th><th>Aplican</th><th>No aplican</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.name)}</td><td>${fmt(r.total)}</td><td>${fmt(r.open)}</td><td>${fmt(r.closed)}</td><td><strong>${r.rate}%</strong></td><td>${fmt(r.aplica)}</td><td>${fmt(r.noAplica)}</td></tr>`).join('')||'<tr><td colspan="7">No hay casos para esta selección.</td></tr>'}</tbody></table></div>`;
   }
   function renderDetails(tickets,allTickets,users,staff,filters) {
-    const s=summarize(tickets,users,staff),countries=group(allTickets,'country'),countryBase=filters.country&&filters.country!=='all'?allTickets.filter(t=>t.country===filters.country):allTickets,studies=group(countryBase,'client');
-    const option=(value,label,selected)=>`<option value="${escapeHtml(value)}" ${selected?'selected':''}>${escapeHtml(label)}</option>`;
-    return `<section class="card detail-filter-panel"><div><h2>Indicadores detallados</h2><p class="sub">Selecciona un país y un estudio para revisar su desempeño. Las descargas de esta hoja respetan los filtros.</p></div><div class="detail-filters"><label>País<select id="manager-country-filter">${option('all','Todos los países',!filters.country||filters.country==='all')}${countries.map(x=>option(x.name,x.name,filters.country===x.name)).join('')}</select></label><label>Estudio / cliente<select id="manager-study-filter">${option('all','Todos los estudios',!filters.study||filters.study==='all')}${studies.map(x=>option(x.name,x.name,filters.study===x.name)).join('')}</select></label></div><p class="filter-result" role="status">Mostrando ${fmt(tickets.length)} de ${fmt(allTickets.length)} solicitudes.</p></section>
+    const s=summarize(tickets,users,staff);
+    return `<section class="card"><h2>Indicadores detallados</h2><p class="sub">Los indicadores y todas las descargas respetan los filtros superiores. Los históricos sin horarios fiables no se incluyen en el cierre promedio.</p></section>
       ${window.PQRAudits?.render(tickets,filters.auditLookup)||''}
       <section class="metrics dashboard-metrics detail-metrics" aria-label="Indicadores detallados">${metric('Solicitudes del segmento',fmt(s.total))}${metric('Tasa de cierre',`${pct(s.closed,s.total)}%`,`${fmt(s.closed)} cerradas`)}${metric('En gestión',fmt(s.open))}${metric('Aplican',fmt(s.aplica),`${pct(s.aplica,s.decided)}% de dictámenes`)}${metric('No aplican',fmt(s.noAplica))}${metric('Redigitación pendiente',fmt(s.redigit))}${metric('Verificación pendiente',fmt(s.verification))}${metric('Cierre promedio',s.avgClosure===null?'—':`${s.avgClosure} h`)}${metric('Solicitudes directas',fmt(s.direct))}</section>
       <section class="manager-grid" aria-label="Gráficas de indicadores detallados"><article class="card manager-card"><div class="card-heading"><h2>Estado del segmento</h2><small>Distribución actual</small></div>${bars(statusRows(s.statuses),'#0d5cab')}</article><article class="card manager-card"><div class="card-heading"><h2>Evolución de radicados</h2><small>Últimas 10 fechas con actividad</small></div>${bars(trend(tickets),'#33bdee')}</article><article class="card manager-card"><div class="card-heading"><h2>Tipologías</h2><small>Casos dictaminados</small></div>${bars(s.tipologies,'#6d37a9')}</article><article class="card manager-card"><div class="card-heading"><h2>Áreas adjudicables</h2><small>Responsabilidad asignada</small></div>${bars(s.areas,'#14a83b')}</article></section>
@@ -91,13 +90,18 @@ window.PQRReports = (() => {
       <section class="card manager-card"><div class="card-heading"><h2>Casos incluidos en el análisis</h2><small>${fmt(tickets.length)} solicitudes</small></div><div class="table-wrap"><table class="table detail-table"><thead><tr><th>Radicado</th><th>País</th><th>Estudio</th><th>Estado</th><th>Dictamen</th><th>Tipología</th><th>Auditoría</th></tr></thead><tbody>${tickets.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(t=>`<tr><td>${escapeHtml(t.code)}</td><td>${escapeHtml(t.country)}</td><td>${escapeHtml(t.client)}</td><td>${escapeHtml(statusLabel(t.status))}</td><td>${escapeHtml(t.applies||'Pendiente')}</td><td>${escapeHtml(t.tipology||'—')}</td>${window.PQRAudits?.cell(t,filters.auditLookup)||'<td>Sin consultar</td>'}</tr>`).join('')||'<tr><td colspan="7">No hay solicitudes para esta selección.</td></tr>'}</tbody></table></div></section>`;
   }
   function render(tickets,users,staff,filters={}) {
-    const selected=filterTickets(tickets,{type:filters.type});
+    const selected=filterTickets(tickets,filters);
     const s=summarize(selected,users,staff);
-    const view=filters.view==='details'?'details':'overview';
-    const shell=`<div class="topline manager-title"><div><span class="eyebrow">GERENCIA · SOLICITUDES</span><h1>Dashboard de gestión</h1><p class="sub">Indicadores de las solicitudes registradas en el portal.</p></div><div><div class="actions export-actions"><button class="ghost" data-action="export-pdf">Descargar PDF ejecutivo</button><button class="secondary" data-action="export-summary">Excel resumen</button><button class="primary" data-action="export-cases">Excel casos</button></div><p id="export-status" class="export-status" role="status" aria-live="polite"></p></div></div><nav class="manager-tabs" aria-label="Hojas de Gerencia"><button class="${view==='overview'?'active':''}" data-action="manager-view" data-manager-view="overview" aria-current="${view==='overview'?'page':'false'}">Resumen ejecutivo</button><button class="${view==='details'?'active':''}" data-action="manager-view" data-manager-view="details" aria-current="${view==='details'?'page':'false'}">Indicadores detallados</button></nav><div class="ticket-filter"><label>Tipo de solicitud<select id="manager-type-filter"><option value="all" ${!filters.type||filters.type==='all'?'selected':''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind,label])=>`<option value="${kind}" ${filters.type===kind?'selected':''}>${label}</option>`).join('')}</select></label><small>Mostrando ${fmt(selected.length)} de ${fmt(tickets.length)} solicitudes</small></div>`;
-    const auditPanel=window.PQRAudits?.render(filterTickets(tickets,view==='details'?filters:{type:filters.type}),filters.auditLookup)||'';
+    const view=['details','pending'].includes(filters.view)?filters.view:'overview';
+    const select=(key,label,values)=>`<label>${label}<select id="manager-${key}-filter"><option value="all">Todos</option>${values.map(([value,name])=>`<option value="${escapeHtml(value)}" ${filters[key]===value?'selected':''}>${escapeHtml(name)}</option>`).join('')}</select></label>`;
+    const values=field=>group(tickets,field).map(r=>[r.name,r.name]);
+    const months=[...new Set(tickets.map(t=>t.reportingMonth).filter(Boolean))].sort().reverse().map(m=>[m,m]);
+    const analysts=[...new Map(tickets.map(t=>[t.analystName||t.validatorPersonId,t.analystName||staff.validators?.find(v=>v.id===t.validatorPersonId)?.name]).filter(([id,name])=>id&&name)).entries()];
+    const shell=`<div class="topline manager-title"><div><span class="eyebrow">GERENCIA · SOLICITUDES</span><h1>Dashboard de gestión</h1><p class="sub">PQR históricas y solicitudes de la plataforma, con origen identificado.</p></div><div><div class="actions export-actions"><button class="ghost" data-action="export-pdf">Descargar PDF ejecutivo</button><button class="secondary" data-action="export-summary">Excel resumen</button><button class="primary" data-action="export-cases">Excel casos</button></div><p id="export-status" class="export-status" role="status" aria-live="polite"></p></div></div><nav class="manager-tabs" aria-label="Hojas de Gerencia">${[['overview','Resumen ejecutivo'],['details','Indicadores detallados'],['pending','Datos por completar']].map(([key,label])=>`<button class="${view===key?'active':''}" data-action="manager-view" data-manager-view="${key}" aria-current="${view===key?'page':'false'}">${label}</button>`).join('')}</nav><section class="card manager-global-filters" aria-label="Filtros del dashboard">${select('country','País',values('country'))}${select('study','Estudio',values('client'))}${select('month','Mes de auditoría',months)}${select('origin','Origen',[['historical','Histórico (Excel)'],['platform','Plataforma']])}${select('type','Tipo de solicitud',Object.entries(requestLabels))}${select('status','Estado',values('status').map(([v])=>[v,statusLabel(v)]))}${select('analyst','Analista de PQR',analysts)}<div><button class="ghost" data-action="reset-manager-filters">Limpiar filtros</button><small role="status">${fmt(selected.length)} de ${fmt(tickets.length)} solicitudes</small></div><p class="sub full">Mes = Ola de Databricks; si no cruza, mes del Excel en históricos y fecha de radicación en plataforma. Las correcciones manuales tienen prioridad y quedan identificadas. El histórico se conserva cerrado y no genera avisos ni SLA.</p></section>`;
+    if(view==='pending')return shell+window.PQRHistory.pending(selected);
+    const auditPanel=window.PQRAudits?.render(selected,filters.auditLookup)||'';
     if(view==='details')return shell+renderDetails(filterTickets(tickets,filters),tickets,users,staff,filters);
-    const validatorRows=s.validators.map(v=>`<tr><td>${escapeHtml(v.name)}<small>${v.active?'Activo':'Inactivo'}</small></td><td>${fmt(v.assigned)}</td><td>${fmt(v.decided)}</td><td>${fmt(v.closed)}</td></tr>`).join('');
+    const validatorRows=s.validators.map(v=>`<tr><td>${escapeHtml(v.name)}<small>${v.active===null?'Histórico / dato de reporte':v.active?'Activo':'Inactivo'}</small></td><td>${fmt(v.assigned)}</td><td>${fmt(v.decided)}</td><td>${fmt(v.closed)}</td></tr>`).join('');
     const redigitatorRows=s.redigitators.map(v=>`<tr><td>${escapeHtml(v.name)}<small>${v.active?'Activo':'Inactivo'}</small></td><td>${fmt(v.assigned)}</td><td>${fmt(v.completed)}</td><td>${fmt(v.closed)}</td></tr>`).join('');
     const recent=selected.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
     return `${shell}${auditPanel}
@@ -112,7 +116,7 @@ window.PQRReports = (() => {
       </section>
       <section class="card manager-card"><div class="card-heading"><h2>Gestión por Analista de PQR</h2><small>Casos asignados, dictaminados y cerrados</small></div><div class="table-wrap"><table class="table manager-table"><thead><tr><th>Analista de PQR</th><th>Asignadas</th><th>Dictaminadas</th><th>Cerradas</th></tr></thead><tbody>${validatorRows||'<tr><td colspan="4">No hay Analistas de PQR registrados.</td></tr>'}</tbody></table></div></section>
       <section class="card manager-card"><div class="card-heading"><h2>Gestión por redigitador</h2><small>Casos asignados y auditorías enviadas a verificación</small></div><div class="table-wrap"><table class="table manager-table"><thead><tr><th>Redigitador</th><th>Asignadas</th><th>Redigitadas</th><th>Cerradas</th></tr></thead><tbody>${redigitatorRows||'<tr><td colspan="4">No hay redigitadores registrados.</td></tr>'}</tbody></table></div></section>
-      <section class="card manager-card"><div class="card-heading"><div><h2>Detalle de solicitudes</h2><small id="dashboard-filter-count">${fmt(selected.length)} de ${fmt(selected.length)} casos</small></div><label class="dashboard-filter">Filtrar por estado<select id="dashboard-status-filter"><option value="all">Todos los estados</option>${s.statuses.map(row=>`<option value="${escapeHtml(row.name)}">${escapeHtml(statusLabel(row.name))} (${fmt(row.count)})</option>`).join('')}</select></label></div><div class="table-wrap"><table class="table manager-table"><thead><tr><th>Radicado</th><th>Cliente</th><th>País</th><th>Estado</th><th>Dictamen</th><th>Auditoría</th></tr></thead><tbody>${recent.map(t=>`<tr data-case-status="${escapeHtml(t.status)}"><td>${escapeHtml(t.code)}<small>${escapeHtml(asDate(t.createdAt))}</small></td><td>${escapeHtml(t.client)}</td><td>${escapeHtml(t.country)}</td><td>${escapeHtml(statusLabel(t.status))}</td><td>${escapeHtml(t.applies|| (requestType(t)==='RDG'?'Redigitación directa':requestType(t)==='EDC'?'Edición':'Pendiente'))}</td>${window.PQRAudits?.cell(t,filters.auditLookup)||'<td>Sin consultar</td>'}</tr>`).join('')||'<tr><td colspan="6">Aún no hay solicitudes radicadas.</td></tr>'}</tbody></table></div></section>`;
+      <section class="card manager-card"><div class="card-heading"><div><h2>Detalle de solicitudes</h2><small id="dashboard-filter-count">${fmt(selected.length)} de ${fmt(selected.length)} casos</small></div><small>Estado y demás filtros: panel superior</small></div><div class="table-wrap"><table class="table manager-table"><thead><tr><th>Radicado</th><th>Cliente</th><th>País</th><th>Estado</th><th>Dictamen</th><th>Auditoría</th></tr></thead><tbody>${recent.map(t=>`<tr data-case-status="${escapeHtml(t.status)}"><td>${escapeHtml(t.code)}<small>${escapeHtml(asDate(t.createdAt))}</small></td><td>${escapeHtml(t.client)}</td><td>${escapeHtml(t.country)}</td><td>${escapeHtml(statusLabel(t.status))}</td><td>${escapeHtml(t.applies|| (requestType(t)==='RDG'?'Redigitación directa':requestType(t)==='EDC'?'Edición':'Pendiente'))}</td>${window.PQRAudits?.cell(t,filters.auditLookup)||'<td>Sin consultar</td>'}</tr>`).join('')||'<tr><td colspan="6">Aún no hay solicitudes radicadas.</td></tr>'}</tbody></table></div></section>`;
   }
 
   function pdf(tickets,users,staff,filters={}) {
@@ -143,13 +147,18 @@ window.PQRReports = (() => {
     kpi(cardX[4],59,cardW,'Directas',fmt(s.direct),'Redigitación comercial',blue);
     segmentPanel(16,94,130,'Resultados por país',breakdown(tickets,'country'));
     segmentPanel(151,94,130,'Resultados por estudio',breakdown(tickets,'client'));
+    for(const page of [1,2]){
+      doc.setPage(page);doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...muted);
+      doc.text(fit(`Mes de auditoría: ${filters.month&&filters.month!=='all'?filters.month:'Todos'}  |  Origen: ${filters.origin==='historical'?'Histórico Excel':filters.origin==='platform'?'Plataforma':'Todos'}  |  Estado: ${filters.status&&filters.status!=='all'?statusLabel(filters.status):'Todos'}  |  Analista: ${filters.analyst&&filters.analyst!=='all'?filters.analyst:'Todos'}`,265,7),16,56);
+      doc.text('Los históricos sin horas fiables no se incluyen en el cierre promedio. Las correcciones manuales conservan la fuente original.',16,191);
+    }
     doc.save(`PQR_informe_ejecutivo_${new Date().toISOString().slice(0,10)}.pdf`);
   }
 
-  function excelSummary(tickets,users,staff) {
+  function excelSummary(tickets,users,staff,filters={}) {
     if (!window.XLSX) throw new Error('No está disponible el generador de Excel.');
     const s=summarize(tickets,users,staff),rows=[
-      ['Portal PQR - Resumen de gestión'],['Generado',new Date().toLocaleString('es-CO')],[],
+      ['Portal PQR - Resumen de gestión'],['Generado',new Date().toLocaleString('es-CO')],['Mes de auditoría',filters.month||'all'],['Origen',filters.origin||'all'],['País',filters.country||'all'],['Estudio',filters.study||'all'],[],
       ['Indicador','Valor'],['Solicitudes radicadas',s.total],['En gestión',s.open],['Cerradas',s.closed],['Aplican',s.aplica],['No aplican',s.noAplica],['Pendientes de redigitación',s.redigit],['Pendientes de verificación',s.verification],['Con área adjudicable',s.adjudicable],['Tiempo medio de cierre (horas)',s.avgClosure??'Sin cierres'],[],
       ['Tipología','Casos'],...s.tipologies.map(x=>[x.name,x.count]),[],['Área adjudicable','Casos'],...s.areas.map(x=>[x.name,x.count]),[],['Estado','Casos'],...s.statuses.map(x=>[statusLabel(x.name),x.count]),[],['Analista de PQR','Asignadas','Dictaminadas','Cerradas'],...s.validators.map(v=>[v.name,v.assigned,v.decided,v.closed]),[],['Redigitador','Asignadas','Redigitadas','Cerradas'],...s.redigitators.map(v=>[v.name,v.assigned,v.completed,v.closed])
     ];
@@ -158,7 +167,7 @@ window.PQRReports = (() => {
 
   function excelCases(tickets,users=[],staff={}) {
     if (!window.XLSX) throw new Error('No está disponible el generador de Excel.');
-  const baseHeaders=['Trámite','Radicado','Fecha/hora creación','Comercial','ID PDV','Cliente','País','Descripción','Estado','Dictamen','Tipología','Área adjudicable','Analista de PQR','Tipo redigitación','Responsable redigitación','ID auditoría','Nueva auditoría','Respuesta','Verificación final','Fecha/hora cierre','Archivo de referencia','Notas de redigitación','Retroalimentación satisfactoria','Comentario de retroalimentación'];
+  const baseHeaders=['Trámite','Radicado','Fecha/hora creación','Comercial','ID PDV','Cliente','País','Descripción','Estado','Dictamen','Tipología','Área adjudicable','Analista de PQR','Tipo redigitación','Responsable redigitación','ID auditoría','Nueva auditoría','Respuesta','Verificación final','Fecha/hora cierre','Archivo de referencia','Notas de redigitación','Retroalimentación satisfactoria','Comentario de retroalimentación','Origen','Mes de auditoría','Mes Excel','Fuente del mes','Fila Excel','ID original Excel','Estudio Excel','País Excel','Auditor de campo','Validador de auditoría','Ciudad','Región','Datos manuales','Información pendiente'];
     const maxEvents=Math.max(0,...tickets.map(t=>Array.isArray(t.timeline)?t.timeline.length:0));
     const headers=[...baseHeaders,...Array.from({length:maxEvents},(_,i)=>[`Paso ${i+1} · etapa`,`Paso ${i+1} · fecha y hora`,`Paso ${i+1} · responsable`,`Paso ${i+1} · detalle`]).flat()];
     const excelDate=value=>{if(!value)return '';const result=new Date(value);return Number.isNaN(result.getTime())?'':result};
@@ -168,7 +177,7 @@ window.PQRReports = (() => {
     const rows=tickets.map(t=>{
       const events=(Array.isArray(t.timeline)?t.timeline:[]).slice().sort((a,b)=>new Date(a.at)-new Date(b.at));
       const history=Array.from({length:maxEvents},(_,i)=>{const item=events[i];return item?[item.action,excelDate(item.at),item.actor,item.detail]:['','','','']}).flat();
-    return [requestLabels[requestType(t)],t.code,excelDate(t.createdAt),commercialName(t),t.pdv,t.client,t.country,t.description,statusLabel(t.status),t.applies,t.tipology,t.area,personName('validators',t.validatorPersonId),t.redigitType,t.fieldRedigitatorName||personName('redigitators',t.redigitatorPersonId),t.auditOriginal,t.audit,t.response,t.verifyComment,excelDate(t.closedAt),t.support,t.redigitNotes,t.feedback?(t.feedback.ok?'Sí':'No'):'',t.feedback?.comment,...history].map(clean);
+    return [requestLabels[requestType(t)],t.code,t.origin==='historical'?t.createdAt:excelDate(t.createdAt),commercialName(t),t.pdv,t.client,t.country,t.description,statusLabel(t.status),t.applies,t.tipology,t.area,t.analystName||personName('validators',t.validatorPersonId),t.redigitType,t.fieldRedigitatorName||personName('redigitators',t.redigitatorPersonId),t.auditOriginal,t.audit,t.response,t.verifyComment,t.origin==='historical'?t.closedAt:excelDate(t.closedAt),t.support,t.redigitNotes,t.feedback?(t.feedback.ok?'Sí':'No'):'',t.feedback?.comment,t.origin==='historical'?'Histórico (Excel)':'Plataforma',t.reportingMonth,t.excelMonth,t.correction?.patch?.reportingMonth?'Manual':t.monthSource,t.sourceRow,t.sourceId,t.excelStudy,t.excelCountry,t.auditData?.nombre_usuario,t.auditData?.Validador,t.auditData?.ciudad,t.auditData?.region,t.hasManualData?'Sí':'No',t.dataIssues?.join(' · '),...history].map(clean);
     });
     const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([headers,...rows],{cellDates:true,dateNF:'dd/mm/yyyy hh:mm:ss'});
     ws['!cols']=headers.map(header=>({wch:header.includes('detalle')||['Descripción','Respuesta','Verificación final','Notas de redigitación','Comentario de retroalimentación'].includes(header)?55:header.includes('fecha')||header.includes('hora')?23:header.includes('responsable')?30:header==='Radicado'?23:header==='ID PDV'||header.includes('auditoría')?21:20}));

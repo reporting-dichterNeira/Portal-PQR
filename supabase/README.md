@@ -19,3 +19,22 @@ Los correos para notificaciones se vinculan por Administración a cada cuenta en
 La migración `20260930213815_configurar_cron_correo.sql` instala `pg_cron` y `pg_net`, restringe sus esquemas internos y configura el trabajo `pqr-mailer-every-minute`. Antes de aplicarla, guardar en Vault un secreto llamado `pqr_mailer_token` con el mismo valor de `PQR_MAILER_TOKEN` (mínimo 32 caracteres). La función tiene `verify_jwt = false` en `config.toml` porque valida su propia clave privada en la cabecera `x-pqr-mailer-token`. No agregar esa cabecera ni su valor al frontend.
 
 Para verificar Gmail sin mandar correos, invocar la función desde el servidor con `{"action":"verify_smtp"}` y la cabecera privada tomada de Vault: debe devolver `{"smtp":"ready","sender":"reporting.dichterneira@gmail.com"}`. Una llamada sin la cabecera debe devolver 401. Consultar `cron.job_run_details` y `net._http_response` para revisar las ejecuciones reales, sin mostrar cabeceras ni claves. Cada cuenta destinataria debe tener al menos un correo vinculado en Administración → Correos. Las cuentas sin correos mantienen sus avisos pendientes y se reintentan cada 15 minutos.
+
+## Histórico de septiembre de 2026
+
+`20261015204849_pqr_historical_reporting.sql` separa `pqr_historical_cases` de los tickets operativos. Solo Gerencia y Administración pueden leerlo. El archivo de origen y sus filas no se publican en GitHub: `source_hash`, hoja, fila, ID original y valores de origen quedan en Supabase, bajo RLS. No se crean cuentas, notificaciones, correos ni secuencias operativas al importar.
+
+La primera carga contiene 1.438 PQR cerradas de `BASE REQUERIDA PQR KO`: septiembre según Ola de Databricks (617), y mes del Excel cuando no cruza (821). La hoja `borrador` no se importa. Se consulta toda la base antes de seleccionar el mes; no se filtra por fecha de radicación. Cada fila conserva un UUID determinista y un radicado `PQR-HIS-2026-09-<fila>`. No se deduplica por ID de auditoría, pues varias reclamaciones pueden corresponder a una auditoría. Se descartan únicamente filas idénticas, dejando un manifiesto local; esta carga no tenía duplicados exactos seleccionados.
+
+Preparación local, con Python del runtime y `openpyxl`, solo lectura:
+
+```text
+python scripts/read_history_workbook.py "ruta/al/archivo.xlsx" tmp/legacy-pqr/source.json
+node scripts/prepare_history_import.mjs tmp/legacy-pqr/source.json tmp/legacy-pqr/lookup.json tmp/legacy-pqr 2026-09
+```
+
+`lookup.json` debe contener `{sha256, checkedAt, records: {auditId: [filas]}}` con consultas completas y autorizadas de los 14 campos de Databricks, dentro del alcance KO/Lindley y Ola desde 2026. Un error de consulta nunca se registra como ausencia de datos. El preparador exige todos los IDs y detiene comentarios que puedan contener credenciales para revisión privada. Los lotes SQL generados son privados e idempotentes (`ON CONFLICT DO NOTHING`); nunca se añaden a Git ni al directorio `docs/`. El Excel original no se guarda ni modifica. La caché inicial no sobrescribe un corte ya existente, y el trabajo habitual de las 6:00/14:00 de Bogotá refresca también los IDs históricos.
+
+Gerencia tiene filtros comunes por país, estudio, mes, origen, tipo, estado y analista; se aplican a ambas hojas, pendientes y descargas. Los datos de estudio/país/mes de Databricks tienen prioridad sobre Excel. Los valores manuales tienen prioridad de reporte y se identifican expresamente. Los históricos sin horarios fiables no entran en cierre promedio ni SLA. Los rankings usan datos disponibles del cruce, respaldo Excel y correcciones; el KPI de coincidencias sigue mostrando el resultado real de Databricks, sin presentar una corrección manual como coincidencia.
+
+`pqr_case_overrides` conserva correcciones de indicadores sin escribir en `pqr_tickets` ni en la fila original. RLS limita lectura/escritura a Gerencia/Administración; solo se conceden columnas permitidas. El trigger invoker valida claves/tipos, asigna responsable y hora del servidor y añade versiones al historial. El formulario usa `updated_at` para rechazar sobrescrituras concurrentes. Solo en históricos se permite corregir el ID de auditoría para el cruce; en solicitudes operativas permanece intacto. `supabase/tests/historical_reporting.sql` prueba permisos, inmutabilidad, auditoría y concurrencia en una transacción revertida, sin tickets ni correos de prueba.

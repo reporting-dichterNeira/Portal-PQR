@@ -26,11 +26,16 @@ Deno.serve(async request => {
     if (profileError || !actor?.active || !['gerente','admin'].includes(actor.role)) return reply({error:'Consulta reservada a Gerencia y Administración'},403);
     let input;
     try { input = await request.json(); } catch { return reply({error:'Solicitud inválida'},400); }
-    const ticketIds = input?.ticketIds;
-    if (!Array.isArray(ticketIds) || !ticketIds.length || ticketIds.length>50 || ticketIds.some(id=>typeof id!=='string'||!uuid.test(id))) return reply({error:'Selecciona entre 1 y 50 solicitudes válidas'},400);
-    const {data:tickets,error:ticketError} = await client.from('pqr_tickets').select('id,data').in('id',ticketIds).is('deleted_at',null);
-    if (ticketError) return reply({error:'No se pudieron consultar las solicitudes'},500);
-    if (tickets?.length !== new Set(ticketIds).size) return reply({error:'Una solicitud no existe o no está disponible'},403);
+    const ticketIds = input?.ticketIds ?? [], historicalIds = input?.historicalIds ?? [];
+    if (!Array.isArray(ticketIds)||!Array.isArray(historicalIds)||ticketIds.length+historicalIds.length<1||ticketIds.length+historicalIds.length>50||[...ticketIds,...historicalIds].some(id=>typeof id!=='string'||!uuid.test(id))) return reply({error:'Selecciona entre 1 y 50 solicitudes válidas'},400);
+    const [live,history,overrides] = await Promise.all([
+      ticketIds.length?client.from('pqr_tickets').select('id,data').in('id',ticketIds).is('deleted_at',null):{data:[],error:null},
+      historicalIds.length?client.from('pqr_historical_cases').select('id,data').in('id',historicalIds):{data:[],error:null},
+      historicalIds.length?client.from('pqr_case_overrides').select('case_id,patch').eq('source','historical').in('case_id',historicalIds):{data:[],error:null},
+    ]);
+    if(live.error||history.error||overrides.error)return reply({error:'No se pudieron consultar las solicitudes'},500);
+    if(live.data?.length!==new Set(ticketIds).size||history.data?.length!==new Set(historicalIds).size)return reply({error:'Una solicitud no existe o no está disponible'},403);
+    const tickets=[...(live.data||[]),...(history.data||[]).map(t=>({...t,data:{...t.data,auditOriginal:overrides.data?.find(o=>o.case_id===t.id)?.patch?.auditOriginal||t.data.auditOriginal}}))];
     const ids = [...new Set(tickets.flatMap(t=>[auditId(t.data.auditOriginal),auditId(t.data.audit)]).filter(Boolean))];
     if (!ids.length) return reply({entries:{},source:'scheduled',checkedAt:null});
     // RLS also checks the active role and ticket linkage on the cache itself.

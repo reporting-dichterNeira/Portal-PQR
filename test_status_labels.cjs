@@ -31,7 +31,7 @@ test('etiqueta nueva sin cambiar los estados internos ni las acciones', () => {
 
 test('dashboard, gráfico y filtro muestran En revisión con filtros compatibles', () => {
   const html = reports.render([ticket], [], {});
-  assert.match(html, /value="En Validación">En revisión \(1\)/);
+  assert.match(html, /value="En Validación"[^>]*>En revisión</);
   assert.match(html, /data-case-status="En Validación"/);
   assert.match(html, /<span>En revisión<\/span>/);
   assert.match(html, /<td>En revisión<\/td>/);
