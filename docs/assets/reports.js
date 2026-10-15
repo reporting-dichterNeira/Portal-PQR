@@ -38,11 +38,12 @@ window.PQRReports = (() => {
     const closureHours=closed.filter(t=>t.timingComplete!==false&&t.createdAt&&t.closedAt).map(t=>(new Date(t.closedAt)-new Date(t.createdAt))/36e5).filter(x=>Number.isFinite(x)&&x>=0);
     const avgClosure=closureHours.length ? Math.round(closureHours.reduce((a,b)=>a+b,0)/closureHours.length*10)/10 : null;
     const knownValidators=staff.validators||[];
-    const validatorIds=new Set([...knownValidators.map(p=>p.id),...tickets.map(t=>t.validatorPersonId).filter(Boolean)]);
-    const validators=[...validatorIds].map(personId=>{
-      const own=tickets.filter(t=>t.validatorPersonId===personId);
-      const person=knownValidators.find(p=>p.id===personId);
-      return {name:person?.name||own.find(t=>t.analystName)?.analystName||'Responsable histórico',active:person?person.active!==false:null,assigned:own.length,decided:own.filter(t=>t.applies).length,closed:own.filter(t=>closedStatuses.has(t.status)).length};
+    const analystName=t=>t.analystName||knownValidators.find(p=>p.id===t.validatorPersonId)?.name||(t.validatorPersonId?'Responsable histórico':'');
+    const validatorNames=new Set([...knownValidators.map(p=>p.name),...tickets.map(analystName).filter(Boolean)]);
+    const validators=[...validatorNames].map(name=>{
+      const own=tickets.filter(t=>analystName(t)===name);
+      const person=knownValidators.find(p=>p.name===name);
+      return {name,active:person?person.active!==false:null,assigned:own.length,decided:own.filter(t=>t.applies).length,closed:own.filter(t=>closedStatuses.has(t.status)).length};
     }).sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name,'es'));
     const knownRedigitators=staff.redigitators||[];
     const redigitatorIds=new Set([...knownRedigitators.map(p=>p.id),...tickets.map(t=>t.redigitatorPersonId).filter(Boolean)]);

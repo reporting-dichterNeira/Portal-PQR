@@ -50,11 +50,13 @@ window.PQRHistory = (() => {
     if(t.origin==='historical'&&Object.hasOwn(patch,'auditOriginal'))t.auditOriginal=patch.auditOriginal;
     const m=window.PQRAudits?.match(t,lookup),row=m?.status==='found'?m.rows[0]:null;
     t.reportingMonth=month(row?.Ola)||t.reportingMonth||(t.origin==='platform'?text(t.createdAt).slice(0,7):'');
+    t.monthSource=month(row?.Ola)?'Databricks':t.monthSource||(t.origin==='platform'?'Radicación':'Excel');
     if(row){t.client=study(row.Survey)||t.client;t.country=country(row.pais)||t.country;t.pdv=id(row.ID_de_PDV)||t.pdv;}
     const fallback={...(t.auditFallback||{})};
     for(const field of ['nombre_usuario','Validador'])if(/^\d+$|^20\d{2}-/.test(text(fallback[field])))fallback[field]='';
     t.auditData={...fallback,...Object.fromEntries(Object.entries(row||{}).filter(([,v])=>text(v)))};
     for(const [key] of editable)if(Object.hasOwn(patch,key)&&!key.startsWith('audit'))t[key]=patch[key];
+    if(Object.hasOwn(patch,'reportingMonth'))t.monthSource='Manual';
     for(const [key,field] of [['auditAuditor','nombre_usuario'],['auditValidator','Validador'],['auditCity','ciudad'],['auditRegion','region']])if(Object.hasOwn(patch,key))t.auditData[field]=patch[key];
     t.hasManualData=Object.keys(patch).length>0;t.correction=correction||null;
     t.matchStatus=m?.status||'pending';

@@ -45,3 +45,25 @@ test('lector paginado no trunca históricos a mil y escritura usa concurrencia o
  const code=fs.readFileSync('docs/assets/production.js','utf8');assert.match(code,/range\(offset,offset\+499\)/);assert.match(code,/if\(data.length<500\)return rows/);
  assert.match(code,/\.eq\('updated_at',old.updated_at\)/);assert.match(code,/historicalIds:batch.filter/);
 });
+test('paginación real recupera 1.438 casos sin truncar ni repetir filas',async()=>{
+ const code=fs.readFileSync('docs/assets/production.js','utf8'),calls=[];
+ const data=Array.from({length:1438},(_,id)=>({id}));
+ const ctx=vm.createContext({db:{from:()=>({select:()=>({order:()=>({range:async(a,b)=>{calls.push([a,b]);return {data:data.slice(a,b+1),error:null};}})})})}});
+ vm.runInContext(code.slice(code.indexOf('  async function readAll('),code.indexOf('  function renderLogin(')),ctx);
+ const rows=await ctx.readAll('fixture','id');assert.equal(rows.length,1438);assert.equal(new Set(rows.map(r=>r.id)).size,1438);assert.deepEqual(calls,[[0,499],[500,999],[1000,1499]]);
+});
+test('Excel incorpora procedencia, mes y analista histórico sin duplicar hitos del flujo',()=>{
+ const sheets=[],XLSX={utils:{book_new:()=>({}),aoa_to_sheet:rows=>{sheets.push(rows);return {};},book_append_sheet:()=>{},encode_col:()=>''},writeFile:()=>{}};
+ const ctx=vm.createContext({window:{XLSX},XLSX});vm.runInContext(fs.readFileSync('docs/assets/reports.js','utf8'),ctx);
+ const t=h.resolve(h.normalize(source,[]),{});ctx.window.PQRReports.excelCases([t]);
+ const [headers,values]=sheets[0];for(const field of ['Origen','Mes de auditoría','ID original Excel','Información pendiente'])assert.ok(headers.includes(field));
+ assert.equal(values[headers.indexOf('Analista de PQR')],'Analista de ejemplo');assert.equal(values[headers.indexOf('Mes de auditoría')],'2026-09');
+ assert.ok(!headers.includes('Fecha/hora dictamen'));
+});
+test('un mismo analista no se duplica por tener PQR históricas y de plataforma',()=>{
+ const historical=h.normalize(source,[]),live={...historical,origin:'platform',validatorPersonId:'staff-id',analystName:''};
+ const s=r.summarize([historical,live],[],{validators:[{id:'staff-id',name:'Analista de ejemplo',active:true}]});
+ assert.equal(s.validators.length,1);assert.equal(s.validators[0].assigned,2);
+ const stats=context.window.PQRAudits.stats([{...historical,auditData:{}}],{loaded:true,entries:{123:{rows:[]}}});
+ assert.equal(stats.auditors.length,0);assert.equal(stats.cities.length,0);
+});

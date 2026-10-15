@@ -27,7 +27,8 @@ window.PQRAudits = (() => {
       const groups=new Map();
       for(const {ticket,row} of matches) {
         // Group locations by country to avoid merging e.g. cities with identical names.
-        const base=String(row[field]||'Sin datos').trim()||'Sin datos';
+        const base=String(row[field]||'').trim();
+        if(!base)continue; // Unknown people/locations must not appear as ranked entities.
         const name=['ciudad','region'].includes(field)?`${base} · ${row.pais||'Sin país'}`:base;
         if(!groups.has(name))groups.set(name,{name,count:0,aplica:0,noAplica:0,audits:new Set()});
         const group=groups.get(name);group.count++;if(id(row.ID_de_audito))group.audits.add(row.ID_de_audito);

@@ -31,15 +31,23 @@
   let auditLookup = window.PQRAudits?.empty();
   let auditLookupOwner = null;
 
-  const managerTickets = () => [...state.tickets,...state.historical].map(t=>window.PQRHistory.resolve(t,auditLookup,state.overrides.find(o=>o.case_id===t.id)));
+  const managerTickets = () => [...state.tickets,...state.historical].map(t=>{
+    const result=window.PQRHistory.resolve(t,auditLookup,state.overrides.find(o=>o.case_id===t.id));
+    result.analystName=result.analystName||staffName('validador',result.validatorPersonId);
+    return result;
+  });
   async function refreshAudits(tickets = managerTickets()) {
     if (auditLookup.loading || !['gerente','admin'].includes(state.me?.role)) return;
     const owner = state.me.id;
     auditLookup.loading = true; auditLookup.error = '';
+    // One authorized representative per new audit ID; empty IDs need no API call.
+    const requested=new Set();
+    tickets=tickets.filter(t=>{const ids=[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)].filter(Boolean);if(!ids.some(id=>!requested.has(id)))return false;ids.forEach(id=>requested.add(id));return true;});
+    if(state.me.role==='gerente')dashboard();
     try {
       for (let offset = 0; offset < tickets.length; offset += 50) {
         auditLookup.progress = `Consultando solicitudes ${offset + 1} a ${Math.min(offset + 50,tickets.length)} de ${tickets.length}…`;
-        if (state.me?.role === 'gerente') dashboard();
+        const progress=$('.audit-status');if(progress)progress.textContent=auditLookup.progress;
         const batch=tickets.slice(offset,offset+50);
         const {data,error} = await db.functions.invoke('pqr-audits',{body:{ticketIds:batch.filter(t=>t.origin!=='historical').map(t=>t.id),historicalIds:batch.filter(t=>t.origin==='historical').map(t=>t.id)}});
         if (state.me?.id !== owner) return;
@@ -56,6 +64,7 @@
         auditLookup.checkedAt = dates.length?new Date(Math.min(...dates)).toISOString():null;
         auditLookup.loaded = true;
       }
+      auditLookup.loaded = true;
     } catch (error) { if (state.me?.id === owner) auditLookup.error = error.message; }
     finally { if (state.me?.id === owner) { auditLookup.loading = false; if(state.me.role==='gerente') dashboard(); } }
   }
