@@ -42,9 +42,39 @@
     auditLookup.loading = true; auditLookup.error = '';
     // One authorized representative per new audit ID; empty IDs need no API call.
     const requested=new Set();
-    tickets=tickets.filter(t=>{if(window.PQRAudits.integrationExcluded(t))return false;const ids=[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)].filter(Boolean);if(!ids.some(id=>!requested.has(id)))return false;ids.forEach(id=>requested.add(id));return true;});
+    tickets=tickets.filter(t=>{const ids=[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)].filter(Boolean).map(id=>window.PQRAudits.key(t,id));if(!ids.some(id=>!requested.has(id)))return false;ids.forEach(id=>requested.add(id));return true;});
+    const supiTickets=tickets.filter(window.PQRAudits.isSupi);
+    tickets=tickets.filter(t=>!window.PQRAudits.isSupi(t));
     if(state.me.role==='gerente')dashboard();
     try {
+      if(supiTickets.length) { try {
+        auditLookup.progress='Consultando el corte privado de SUPI · KO moderno Chile…';
+        const {data:cut,error:cutError}=await db.from('pqr_supi_sync_state').select('checked_at,run_id').eq('source','SUPI').maybeSingle();
+        if(state.me?.id!==owner)return;
+        if(cutError)throw new Error('No se pudo leer el corte de SUPI. Se conserva la consulta anterior.');
+        if(cut) {
+          const ids=[...new Set(supiTickets.flatMap(t=>[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)]).filter(Boolean))];
+          const entries={};
+          for(let offset=0;offset<ids.length;offset+=100) {
+            const batch=ids.slice(offset,offset+100);
+            const {data:rows,error}=await db.from('pqr_supi_audit_cache').select('audit_id,records,checked_at,run_id').in('audit_id',batch);
+            if(state.me?.id!==owner)return;
+            if(error)throw new Error('No se pudo consultar SUPI. Se conservan los datos anteriores.');
+            if((rows||[]).some(row=>row.run_id!==cut.run_id))throw new Error('SUPI está actualizando su corte. Pulsa Actualizar panel al terminar.');
+            for(const audit of batch)entries[`supi:${audit}`]={rows:[],at:cut.checked_at};
+            for(const row of rows||[])entries[`supi:${row.audit_id}`]={rows:row.records,at:row.checked_at};
+          }
+          // Recheck the cut: never classify a missing ID from mixed snapshots.
+          const {data:latest,error:latestError}=await db.from('pqr_supi_sync_state').select('run_id').eq('source','SUPI').maybeSingle();
+          if(state.me?.id!==owner)return;
+          if(latestError||latest?.run_id!==cut.run_id)throw new Error('El corte de SUPI cambió durante la consulta. Reintenta para leerlo completo.');
+          Object.assign(auditLookup.entries,entries);
+          auditLookup.supiCheckedAt=cut.checked_at;
+        } else {
+          for(const t of supiTickets)for(const audit of [t.auditOriginal,t.audit].map(window.PQRAudits.id).filter(Boolean))delete auditLookup.entries[`supi:${audit}`];
+          auditLookup.supiCheckedAt=null;
+        }
+      } catch(error) { if(state.me?.id!==owner)return; auditLookup.error=error.message; } }
       for (let offset = 0; offset < tickets.length; offset += 50) {
         auditLookup.progress = `Consultando solicitudes ${offset + 1} a ${Math.min(offset + 50,tickets.length)} de ${tickets.length}…`;
         const progress=$('.audit-status');if(progress)progress.textContent=auditLookup.progress;
@@ -65,8 +95,8 @@
         auditLookup.loaded = true;
       }
       auditLookup.loaded = true;
-    } catch (error) { if (state.me?.id === owner) auditLookup.error = error.message; }
-    finally { if (state.me?.id === owner) { auditLookup.loading = false; if(state.me.role==='gerente') dashboard(); } }
+    } catch (error) { if (state.me?.id === owner) auditLookup.error = [auditLookup.error,error.message].filter(Boolean).join(' · '); }
+    finally { if (state.me?.id === owner) { const dates=Object.values(auditLookup.entries).map(entry=>Date.parse(entry.at)).filter(Number.isFinite);auditLookup.checkedAt=dates.length?new Date(Math.min(...dates)).toISOString():null; auditLookup.loading = false; if(state.me.role==='gerente') dashboard(); } }
   }
 
 

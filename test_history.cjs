@@ -92,10 +92,10 @@ test('plataforma abierta no aparece; al cerrar solo aparece si le falta el ID',(
  for(const status of ['Cerrado','No Aplica'])assert.equal(h.resolve({...base,status},{}).dataIssues.length,1);
  assert.equal(h.resolve({...base,status:'Cerrado',auditOriginal:'123'},{loaded:true,entries:{123:{rows:[]}}}).dataIssues.length,0);
 });
-test('KO moderno Chile no requiere cruce ni entra en pendientes, pero el ticket se conserva',()=>{
+test('KO moderno Chile usa SUPI; sin ID no entra en pendientes, pero el ticket se conserva',()=>{
  const t=h.resolve({...h.normalize(source,[]),country:'Chile',client:'KO moderno',excelStudy:'KO moderno',auditFallback:{canal:'MODERNO'},auditOriginal:''},{});
- assert.equal(t.dataIssues.length,0);assert.equal(context.window.PQRAudits.match(t,{}).status,'excluded');
- const stats=context.window.PQRAudits.stats([t],{});assert.equal(stats.total,1);assert.equal(stats.excluded,1);assert.equal(stats.notFound,0);
+ assert.equal(t.dataIssues.length,0);assert.equal(context.window.PQRAudits.match(t,{}).status,'missing_id');
+ const stats=context.window.PQRAudits.stats([t],{});assert.equal(stats.total,1);assert.equal(stats.missing,1);assert.equal(stats.notFound,0);
  assert.equal(r.summarize([t]).total,1);assert.ok(r.render([t],[],{},{}).includes(t.code));
  assert.equal(h.resolve({...t,country:'Perú'},{}).dataIssues.length,1);
  assert.equal(h.resolve({...t,client:'KO tradicional',excelStudy:'KO tradicional',auditFallback:{canal:'TRADICIONAL'}},{}).dataIssues.length,1);

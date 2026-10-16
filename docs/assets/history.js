@@ -59,12 +59,16 @@ window.PQRHistory = (() => {
   function resolve(ticket,lookup,correction) {
     const t={...ticket,origin:ticket.origin||'platform'},patch=correction?.patch||{};
     if(t.origin==='historical'&&Object.hasOwn(patch,'auditOriginal'))t.auditOriginal=patch.auditOriginal;
-    const m=window.PQRAudits?.match(t,lookup),row=m?.status==='found'?m.rows[0]:null;
+    // Routing must use the same reporting corrections as the cache RLS policy.
+    if(Object.hasOwn(patch,'country'))t.country=country(patch.country);
+    if(Object.hasOwn(patch,'client'))t.client=study(patch.client);
+    const m=window.PQRAudits?.match(t,lookup),row=m?.status==='found'?window.PQRAudits.record(t,m.rows[0]):null;
     t.reportingMonth=month(row?.Ola)||t.reportingMonth||(t.origin==='platform'?text(t.createdAt).slice(0,7):'');
     t.monthSource=month(row?.Ola)?'Databricks':t.monthSource||(t.origin==='platform'?'Radicación':'Excel');
-    const surveyStudy=study(row?.Survey),fallbackStudy=study(t.excelStudy||t.client,t.auditFallback?.canal);
+    const surveyStudy=m?.status==='found'&&window.PQRAudits.isSupi(t)?'KO moderno':study(row?.Survey),fallbackStudy=study(t.excelStudy||t.client,t.auditFallback?.canal);
     t.client=surveyStudy||fallbackStudy;
-    t.studySource=surveyStudy?'Databricks':fallbackStudy?(t.origin==='historical'?'Excel':'Plataforma'):'Sin clasificación';
+    t.studySource=surveyStudy?window.PQRAudits.source(t):fallbackStudy?(t.origin==='historical'?'Excel':'Plataforma'):'Sin clasificación';
+    t.auditSource=window.PQRAudits.source(t);
     if(row){t.country=country(row.pais)||t.country;t.pdv=id(row.ID_de_PDV)||t.pdv;}
     const fallback={...(t.auditFallback||{})};
     for(const field of ['nombre_usuario','Validador'])if(/^\d+$|^20\d{2}-/.test(text(fallback[field])))fallback[field]='';
@@ -78,7 +82,7 @@ window.PQRHistory = (() => {
     t.dataIssues=[];
     const closed=['Cerrado','No Aplica'].includes(t.status);
     // This worksheet is an actionable ID queue, not a source-completeness audit.
-    if((t.origin==='historical'||closed)&&!window.PQRAudits?.integrationExcluded(t)&&!id(t.auditOriginal)){
+    if((t.origin==='historical'||closed)&&!window.PQRAudits?.isSupi(t)&&!id(t.auditOriginal)){
       t.dataIssues.push(text(t.auditOriginal)?'ID de auditoría inválido':'Sin ID de auditoría');
     }
     if(patch.analystName)t.validatorPersonId=`reported:${patch.analystName}`;

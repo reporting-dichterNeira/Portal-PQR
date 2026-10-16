@@ -7,9 +7,9 @@ for(const file of ['audits','history','reports'])vm.runInContext(fs.readFileSync
 const {PQRAudits:a,PQRReports:r}=ctx.window;
 const tickets=Array.from({length:13},(_,i)=>({id:`t-${i}`,code:`PQR-2026-${i}`,requestType:'PQR',auditOriginal:String(i+1),country:'Perú',client:'Lindley',origin:'historical',reportingMonth:'2026-09',status:'Cerrado',applies:i===0?'':i%2?'Aplica':'No Aplica'}));
 const lookup={...a.empty(),loaded:true,checkedAt:'2026-10-16T11:00:00Z',entries:Object.fromEntries(tickets.map((t,i)=>[t.auditOriginal,{at:'2026-10-16T11:00:00Z',rows:[{ID_de_audito:t.auditOriginal,pais:'Perú',nombre_usuario:`Auditor ${i}`,Validador:`Validador ${i}`,ciudad:`Ciudad ${i}`,region:`Región ${i}`,canal:`Canal ${i}`,Survey:'lindley_pe_202609'}]}]))};
-test('seis botones cerrados de inicio, una sola categoría desplegada',()=>{
+test('ocho botones cerrados de inicio, una sola categoría desplegada',()=>{
  const closed=a.render(tickets,lookup);
- assert.equal((closed.match(/aria-expanded="false"/g)||[]).length,6);assert.doesNotMatch(closed,/class="bar-chart"/);assert.doesNotMatch(closed,/class="audit-ranking-table"/);
+ assert.equal((closed.match(/aria-expanded="false"/g)||[]).length,8);assert.doesNotMatch(closed,/class="bar-chart"/);assert.doesNotMatch(closed,/class="audit-ranking-table"/);
  for(const key of ['auditors','validators','cities','regions','channels','surveys']){
    const html=a.render(tickets,lookup,key);
    assert.equal((html.match(/aria-expanded="true"/g)||[]).length,1);
