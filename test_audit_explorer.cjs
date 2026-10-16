@@ -19,6 +19,8 @@ test('seis botones cerrados de inicio, una sola categoría desplegada',()=>{
    assert.match(html,/Exportar tabla \(Excel\)/);
  }
  assert.doesNotMatch(a.render(tickets,lookup,'constructor'),/aria-expanded="true"/);
+ assert.match(a.render(tickets,{...lookup,loading:true},'validators'),/disabled>Exportar tabla/);
+ assert.throws(()=>a.exportTable(tickets,{...lookup,loading:true},'validators'),/termine la lectura/);
 });
 test('gráfica top 10, tabla completa; datos y desconocidos mantienen su significado',()=>{
  const html=a.renderExplorer(tickets,lookup,'validators');
