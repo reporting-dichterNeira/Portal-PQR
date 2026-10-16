@@ -46,14 +46,58 @@ window.PQRAudits = (() => {
     return result;
   }
   function chart(title,rows,color) {
-    if(title==='PQR por Survey')title='PQR por estudio';
     const max=Math.max(...rows.map(r=>r.count),1);
     return `<article class="card manager-card"><div class="card-heading"><h2>${esc(title)}</h2><small>Top 10 · PQR radicadas</small></div>${rows.length?`<div class="bar-chart">${rows.slice(0,10).map(row=>`<div class="bar-row"><div class="bar-caption"><span>${esc(row.name)}</span><strong>${row.count}</strong></div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,row.count/max*100)}%;background:${color}"></div></div><small>${row.audits} auditorías · ${row.aplica} aplican · ${row.noAplica} no aplican</small></div>`).join('')}</div>`:'<p class="empty-chart">Sin datos vinculados para esta selección.</p>'}</article>`;
   }
-  function render(tickets,lookup=empty()) {
+  const dimensions = [
+    {key:'auditors',label:'Auditores',title:'Auditores con más PQR',column:'Auditor de campo',color:'#0d5cab',file:'auditores'},
+    {key:'validators',label:'Validadores',title:'Validadores con más PQR',column:'Validador de auditoría',color:'#1696b5',file:'validadores'},
+    {key:'cities',label:'Ciudad',title:'PQR por ciudad',column:'Ciudad / país',color:'#6d37a9',file:'ciudades'},
+    {key:'regions',label:'Región',title:'PQR por región',column:'Región / país',color:'#16823a',file:'regiones'},
+    {key:'channels',label:'Canal',title:'PQR por canal',column:'Canal',color:'#0d5cab',file:'canales'},
+    {key:'surveys',label:'Estudio',title:'PQR por estudio',column:'Estudio',color:'#1696b5',file:'estudios'}
+  ];
+  const dimension = key => dimensions.find(item=>item.key===key);
+  function explorer(s,key='') {
+    const selected=dimension(key),rows=selected?s[selected.key]:[];
+    const headers=[selected?.column||'Categoría','PQR','Auditorías únicas','Aplican','No aplican','Sin dictamen'];
+    return `<section class="card audit-explorer" aria-label="Explorar indicadores de auditoría"><div class="card-heading"><h2>Explorar indicadores</h2><small>Selecciona una categoría</small></div><div class="audit-dimension-buttons" role="group" aria-label="Categorías de auditoría">${dimensions.map(d=>`<button class="${d===selected?'primary':'ghost'}" id="audit-dimension-${d.key}" data-action="audit-dimension" data-audit-dimension="${d.key}" aria-expanded="${d===selected}" aria-controls="audit-breakdown-panel">${esc(d.label)}</button>`).join('')}</div><div id="audit-breakdown-panel" ${selected?`role="region" aria-labelledby="audit-dimension-${selected.key}"`:''}>${selected?`<div class="audit-breakdown-toolbar"><p class="sub">Gráfica: top 10. Tabla y exportación: ${rows.length} registros, sin limitar al top 10. Se respetan todos los filtros superiores.</p><div class="actions"><button class="secondary" data-action="export-audit-table" data-audit-dimension="${selected.key}" ${!rows.length?'disabled':''}>Exportar tabla (Excel)</button><button class="ghost" data-action="audit-dimension" data-audit-dimension="${selected.key}">Ocultar</button></div></div><div class="audit-breakdown-layout">${chart(selected.title,rows,selected.color)}<div class="audit-ranking-table"><table class="table"><caption>${esc(selected.title)} · Tabla completa</caption><thead><tr>${headers.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><th scope="row">${esc(r.name)}</th><td>${r.count}</td><td>${r.audits}</td><td>${r.aplica}</td><td>${r.noAplica}</td><td>${r.count-r.aplica-r.noAplica}</td></tr>`).join('')||'<tr><td colspan="6">Sin datos vinculados para esta selección.</td></tr>'}</tbody></table></div></div>`:'<p class="sub audit-explorer-empty">Pulsa un botón para desplegar su gráfica y consultar o exportar la tabla completa.</p>'}</div><p class="audit-export-status sub" role="status" aria-live="polite"></p></section>`;
+  }
+  const renderExplorer = (tickets,lookup,key='') => explorer(stats(tickets,lookup),key);
+  function exportTable(tickets,lookup,key,filters={}) {
+    const d=dimension(key);
+    if(!d)throw new Error('Selecciona una categoría válida para exportar.');
+    const rows=stats(tickets,lookup)[key];
+    if(!rows.length)throw new Error('No hay datos de esta categoría para los filtros seleccionados.');
+    const XLSX=window.XLSX;
+    if(!XLSX)throw new Error('No está disponible el generador de Excel.');
+    const filterValue=value=>!value||value==='all'?'Todos':value;
+    const content=[
+      [d.title],['Generado',new Date().toLocaleString('es-CO')],
+      ['País',filterValue(filters.country)],['Estudio',filterValue(filters.study)],['Mes de auditoría',filterValue(filters.month)],
+      ['Origen',filters.origin==='historical'?'Histórico (Excel)':filters.origin==='platform'?'Plataforma':'Todos'],
+      ['Tipo de solicitud',filterValue(filters.type)],['Estado',filters.status==='En Validación'?'En revisión':filterValue(filters.status)],
+      ['Analista de PQR',filterValue(filters.analystLabel||filters.analyst)],
+      ['Alcance','Solo PQR por auditoría original. Incluye todos los registros de la categoría, no solo el top 10.'],
+      ['Fuentes','Databricks, respaldo del Excel y correcciones manuales identificadas en el portal.'],
+      ['Corte más antiguo del panel',lookup?.checkedAt?new Date(lookup.checkedAt).toLocaleString('es-CO'):'Sin corte disponible'],[]
+    ];
+    const headerRow=content.length;
+    content.push([d.column,'PQR','Auditorías únicas','Aplican','No aplican','Sin dictamen']);
+    content.push(...rows.map(r=>[r.name,r.count,r.audits,r.aplica,r.noAplica,r.count-r.aplica-r.noAplica]));
+    const safe=content.map(row=>row.map(value=>typeof value==='string'&&/^[=+\-@]/.test(value)?`'${value}`:value));
+    const workbook=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(safe);
+    sheet['!cols']=[{wch:54},...Array.from({length:5},()=>({wch:20}))];
+    sheet['!autofilter']={ref:`A${headerRow+1}:F${content.length}`};
+    for(const cell of Object.values(sheet))if(cell?.t==='n')cell.z='#,##0';
+    XLSX.utils.book_append_sheet(workbook,sheet,d.label);
+    XLSX.writeFile(workbook,`PQR_${d.file}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    return rows.length;
+  }
+  function render(tickets,lookup=empty(),key='') {
     const s=stats(tickets,lookup);
     const kpi=(label,value)=>`<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
-    return `<section class="card audit-connection"><div class="staff-heading"><div><span class="eyebrow">DATABRICKS · AUDITORÍA ORIGINAL</span><h2>Análisis de origen de las PQR</h2><p class="sub">Cruce por ID de auditoría. Los gráficos usan Databricks, respaldo del Excel y correcciones manuales identificadas; los KPI de cruce distinguen su disponibilidad real. Ola desde 2026 y Survey KO o Lindley. Cortes a las 6:00 a. m. y 2:00 p. m. de Bogotá. No modifica los tickets.</p></div><button class="secondary" data-action="refresh-audits" ${lookup.loading?'disabled':''}>${lookup.loading?'Consultando…':'Actualizar panel'}</button></div><p class="audit-status" role="status" aria-live="polite">${esc(lookup.loading?lookup.progress:lookup.error|| (lookup.checkedAt?`Corte más antiguo mostrado: ${new Date(lookup.checkedAt).toLocaleString('es-CO')}`:lookup.loaded?'Sin corte disponible para estas auditorías; espera la siguiente sincronización.':'Pulsa «Actualizar panel» para leer el último corte de auditorías.'))}</p><p class="sub">Los rankings cuentan PQR, no RDG ni EDC, y usan la auditoría original. Una auditoría puede tener varias PQR. Es volumen de casos registrados, no una tasa de error sobre todas las auditorías.</p></section><section class="metrics dashboard-metrics audit-metrics">${kpi('PQR con datos',s.found)}${kpi('Sin datos en el origen',s.notFound)}${kpi('Sin ID de auditoría',s.missing)}${kpi('Por consultar',s.pending)}${kpi('Coincidencias múltiples',s.ambiguous)}${kpi('Sin integración · Chile moderno',s.excluded)}</section><section class="manager-grid" aria-label="Estadísticas de auditoría">${chart('Auditores con más PQR',s.auditors,'#0d5cab')}${chart('Validadores con más PQR',s.validators,'#33bdee')}${chart('PQR por ciudad',s.cities,'#6d37a9')}${chart('PQR por región',s.regions,'#14a83b')}${chart('PQR por canal',s.channels,'#0d5cab')}${chart('PQR por Survey',s.surveys,'#33bdee')}</section>`;
+    return `<section class="card audit-connection"><div class="staff-heading"><div><span class="eyebrow">DATABRICKS · AUDITORÍA ORIGINAL</span><h2>Análisis de origen de las PQR</h2><p class="sub">Cruce por ID de auditoría. Los gráficos usan Databricks, respaldo del Excel y correcciones manuales identificadas; los KPI de cruce distinguen su disponibilidad real. Ola desde 2026 y Survey KO o Lindley. Cortes a las 6:00 a. m. y 2:00 p. m. de Bogotá. No modifica los tickets.</p></div><button class="secondary" data-action="refresh-audits" ${lookup.loading?'disabled':''}>${lookup.loading?'Consultando…':'Actualizar panel'}</button></div><p class="audit-status" role="status" aria-live="polite">${esc(lookup.loading?lookup.progress:lookup.error|| (lookup.checkedAt?`Corte más antiguo mostrado: ${new Date(lookup.checkedAt).toLocaleString('es-CO')}`:lookup.loaded?'Sin corte disponible para estas auditorías; espera la siguiente sincronización.':'Pulsa «Actualizar panel» para leer el último corte de auditorías.'))}</p><p class="sub">Los rankings cuentan PQR, no RDG ni EDC, y usan la auditoría original. Una auditoría puede tener varias PQR. Es volumen de casos registrados, no una tasa de error sobre todas las auditorías.</p></section><section class="metrics dashboard-metrics audit-metrics">${kpi('PQR con datos',s.found)}${kpi('Sin datos en el origen',s.notFound)}${kpi('Sin ID de auditoría',s.missing)}${kpi('Por consultar',s.pending)}${kpi('Coincidencias múltiples',s.ambiguous)}${kpi('Sin integración · Chile moderno',s.excluded)}</section>${explorer(s,key)}`;
   }
   function cell(ticket,lookup) {
     const m=match(ticket,lookup);
@@ -73,5 +117,5 @@ window.PQRAudits = (() => {
     const original=match(t,lookup), latest=match(t,lookup,'new');
     return {ticket:t,original,latest};
   });
-  return {empty,id,match,unique,stats,render,cell,detail,fields,exportRows,integrationExcluded};
+  return {empty,id,match,unique,stats,render,renderExplorer,dimension,exportTable,cell,detail,fields,exportRows,integrationExcluded};
 })();

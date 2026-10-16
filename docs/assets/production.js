@@ -16,7 +16,7 @@
   const attachmentBucket = 'pqr-adjuntos';
   const maxAttachmentBytes = 10 * 1024 * 1024;
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-  const managerState = { view: 'overview', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
+  const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
@@ -594,8 +594,24 @@
       }
       if (type === 'detail' && ticket) return detail(ticket);
       if (state.me.role === 'gerente' && type === 'refresh-audits') return await refreshAudits();
+      if (state.me.role === 'gerente' && type === 'audit-dimension') {
+        const key=window.PQRAudits.dimension(button.dataset.auditDimension)?.key;
+        if(!key)return;
+        managerState.auditDimension=managerState.auditDimension===key?'':key;
+        const cases=PQRReports.filterTickets(managerTickets(),managerState);
+        $('.audit-explorer').outerHTML=window.PQRAudits.renderExplorer(cases,auditLookup,managerState.auditDimension);
+        $('#audit-dimension-'+key)?.focus({preventScroll:true});
+        return;
+      }
+      if (state.me.role === 'gerente' && type === 'export-audit-table') {
+        const cases=PQRReports.filterTickets(managerTickets(),managerState);
+        const analystLabel=$('#manager-analyst-filter')?.selectedOptions[0]?.textContent;
+        const count=window.PQRAudits.exportTable(cases,auditLookup,button.dataset.auditDimension,{...managerState,analystLabel});
+        $('.audit-export-status').textContent=`Archivo Excel generado con ${count} registros de la categoría y los filtros actuales.`;
+        return;
+      }
       if (type==='complete-data'&&reportTicket)return completeData(reportTicket);
-      if (type==='reset-manager-filters'&&state.me.role==='gerente'){for(const key of Object.keys(managerState))if(key!=='view')managerState[key]='all';return dashboard();}
+      if (type==='reset-manager-filters'&&state.me.role==='gerente'){for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';return dashboard();}
       if (state.me.role === 'gerente' && type === 'audit-detail' && reportTicket) return modal(`Auditoría · ${reportTicket.code}`, window.PQRAudits.detail(reportTicket,auditLookup));
       if (state.me.role === 'gerente' && type === 'load-ticket-audit' && reportTicket) {
         await refreshAudits([reportTicket]);

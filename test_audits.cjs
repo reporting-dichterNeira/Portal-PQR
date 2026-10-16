@@ -47,7 +47,7 @@ test('detalles de ambas auditorías, botones en ambas hojas y HTML seguro',()=>{
   assert.match(audits.render([t],lookup),/no una tasa de error/);
   for(const view of ['overview','details']){
     const html=browser.window.PQRReports.render([t],[],{},{view,auditLookup:lookup});
-    assert.match(html,/Ver auditoría/);assert.match(html,/Auditores con más PQR/);assert.match(html,/Con datos/);
+    assert.match(html,/Ver auditoría/);assert.match(html,/Explorar indicadores/);assert.match(html,/Con datos/);
   }
 });
 

@@ -32,6 +32,8 @@ La implementación anterior con FastAPI/SQLite sigue en el repositorio como refe
 
 ## Auditorías desde Databricks
 
+Las seis categorías de auditoría se muestran como botones compactos, cerrados al entrar. Al seleccionar una, se despliega solo su gráfica top 10 y una tabla completa con PQR, auditorías únicas, aplican, no aplican y sin dictamen. El mismo botón u «Ocultar» cierran el panel. La selección se conserva al cambiar filtros o de hoja. «Exportar tabla (Excel)» descarga todos los registros de la categoría seleccionada y el contexto de los filtros, no solo los diez de la gráfica. No inicia consultas nuevas ni altera datos del portal.
+
 Gerencia presenta únicamente tres estudios: KO moderno, KO tradicional y Lindley. Un Survey único de Databricks tiene prioridad (`ko_mod` / `ko_moderno`, `ko_trad` / `ko_tradicional`, `lindley`); sin cruce único, Canal del Excel separa los KO modernos y tradicionales. Se conserva Estudio Excel como fuente original y las correcciones manuales explícitas. Si no hay evidencia suficiente, el ticket permanece en los totales sin inventar un estudio.
 
 Resumen ejecutivo e Indicadores detallados incluyen el evolutivo mensual de PQR registradas, aplican y no aplican, con tabla de valores y sin dictamen para reconciliar el total. Usa el mes de la Ola con los mismos respaldos del filtro, no el mes de recepción. Respeta todos los filtros, excluye RDG/EDC y muestra meses intermedios sin actividad en cero; los registros sin periodo quedan identificados como Sin mes.
