@@ -20,7 +20,7 @@ create foreign table pqr_private.supi_visits (
  "VISITA" text, "FOLIO" text, "AUDITOR" text, "COORDINADOR" text, "DIA" text,
  "NUMERO_SEMANA" text, "DIA_SEMANA" text, "CADENA" text, "DIRECCION" text,
  "COMUNA" text, "INICIO" text, "FIN" text, "DURACION" text, "CLIENTE" text,
- "ESTUDIO" text, "ESTADO" text, "ID ESTUDIO" text
+ "ESTUDIO" text, "ESTADO" text, "ID_ESTUDIO" text
 ) server pqr_supi_server options (table '(SELECT
  CONVERT(varchar(30),v.id_visita) AS VISITA,
  CONVERT(varchar(100),s.foliocadem) AS FOLIO,
@@ -36,7 +36,7 @@ create foreign table pqr_private.supi_visits (
  RIGHT(''0''+CONVERT(varchar,DATEDIFF(SECOND,v.HORAINICIO,v.HORAFIN)%60),2) AS DURACION,
  c.nombrecliente AS CLIENTE, e.nombreestudio AS ESTUDIO,
  CONVERT(varchar(100),v.estado) AS ESTADO,
- CONVERT(varchar(30),es.id_estudio) AS [ID ESTUDIO]
+ CONVERT(varchar(30),es.id_estudio) AS ID_ESTUDIO
  FROM visita v
  LEFT JOIN ESTUDIOSALA es ON v.ID_ESTUDIOSALA=es.ID_ESTUDIOSALA
  LEFT JOIN estudio e ON es.ID_ESTUDIO=e.ID_ESTUDIO
@@ -94,12 +94,20 @@ begin
    return jsonb_build_object('status','already_running');
  end if;
  create temporary table pqr_supi_stage on commit drop as
- select s."VISITA" audit_id, jsonb_agg(to_jsonb(s)) records
+ -- Explicit references are required: wrappers 0.6.2 does not fetch all columns
+ -- for a whole-row to_jsonb(s) reference and silently leaves unrequested ones null.
+ select s."VISITA" audit_id, jsonb_agg(jsonb_build_object(
+ 'VISITA',s."VISITA",'FOLIO',s."FOLIO",'AUDITOR',s."AUDITOR",'COORDINADOR',s."COORDINADOR",
+ 'DIA',s."DIA",'NUMERO_SEMANA',s."NUMERO_SEMANA",'DIA_SEMANA',s."DIA_SEMANA",
+ 'CADENA',s."CADENA",'DIRECCION',s."DIRECCION",'COMUNA',s."COMUNA",
+ 'INICIO',s."INICIO",'FIN',s."FIN",'DURACION',s."DURACION",'CLIENTE',s."CLIENTE",
+ 'ESTUDIO',s."ESTUDIO",'ESTADO',s."ESTADO",'ID ESTUDIO',s."ID_ESTUDIO")) records
  from pqr_private.supi_visits s group by s."VISITA";
  select count(*) into n from pg_temp.pqr_supi_stage;
  if n=0 or exists(select 1 from pg_temp.pqr_supi_stage where audit_id !~ '^[0-9]{1,30}$'
   or jsonb_array_length(records)>20
-  or exists(select 1 from jsonb_array_elements(records) r where r->>'ID ESTUDIO'<>'525' or r->>'DIA'<'2026-01-01'))
+  or exists(select 1 from jsonb_array_elements(records) r where r->>'ID ESTUDIO' is distinct from '525'
+   or r->>'DIA' is null or r->>'DIA'<'2026-01-01' or r->>'VISITA' is distinct from audit_id))
  then raise exception 'SUPI_INVALID_SNAPSHOT'; end if;
  -- All changes commit together. A failed remote query never erases the last cut.
  insert into public.pqr_supi_audit_cache(audit_id,records,checked_at,run_id)

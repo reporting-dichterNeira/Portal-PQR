@@ -94,4 +94,13 @@ test('migración: caché independiente, RLS, secreto por referencia, actualizaci
  assert.match(sql,/\('admin','gerente'\)/);assert.match(sql,/pqr_supi_case|pqr_is_supi_case/);
  assert.match(sql,/on commit drop/);assert.match(sql,/SUPI_REFRESH_FAILED/);assert.match(sql,/pg_try_advisory_xact_lock/);
  assert.match(sql,/'0 11,19 \* \* \*'/);assert.match(sql,/revoke all on function pqr_private\.refresh_supi\(\) from public, anon, authenticated, service_role/);
+ for(const [field] of a.supiFields){
+  const physical=field==='ID ESTUDIO'?'ID_ESTUDIO':field;
+  assert.ok(sql.includes(`'${field}',s."${physical}"`),`Missing explicit foreign column: ${field}`);
+ }
+ assert.match(sql,/r->>'ID ESTUDIO' is distinct from '525'/);assert.match(sql,/r->>'DIA' is null/);
+ const repair=fs.readFileSync('supabase/migrations/20261016143527_pqr_supi_complete_columns.sql','utf8');
+ assert.match(repair,/rename column "ID ESTUDIO" to "ID_ESTUDIO"/);
+ assert.match(repair,/create or replace function pqr_private\.refresh_supi/);
+ assert.ok(repair.includes(sql.slice(sql.indexOf('declare cut'),sql.indexOf('-- pg_cron uses UTC'))));
 });
