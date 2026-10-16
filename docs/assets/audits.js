@@ -33,7 +33,7 @@ window.PQRAudits = (() => {
       const groups=new Map();
       for(const {ticket,row} of matches) {
         // Group locations by country to avoid merging e.g. cities with identical names.
-        const base=String(row[field]||'').trim();
+        const base=String(field==='Survey'?(ticket.client||window.PQRHistory?.study(row.Survey)||row.Survey||''):row[field]||'').trim();
         if(!base)continue; // Unknown people/locations must not appear as ranked entities.
         const name=['ciudad','region'].includes(field)?`${base} · ${row.pais||'Sin país'}`:base;
         if(!groups.has(name))groups.set(name,{name,count:0,aplica:0,noAplica:0,audits:new Set()});
@@ -46,6 +46,7 @@ window.PQRAudits = (() => {
     return result;
   }
   function chart(title,rows,color) {
+    if(title==='PQR por Survey')title='PQR por estudio';
     const max=Math.max(...rows.map(r=>r.count),1);
     return `<article class="card manager-card"><div class="card-heading"><h2>${esc(title)}</h2><small>Top 10 · PQR radicadas</small></div>${rows.length?`<div class="bar-chart">${rows.slice(0,10).map(row=>`<div class="bar-row"><div class="bar-caption"><span>${esc(row.name)}</span><strong>${row.count}</strong></div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,row.count/max*100)}%;background:${color}"></div></div><small>${row.audits} auditorías · ${row.aplica} aplican · ${row.noAplica} no aplican</small></div>`).join('')}</div>`:'<p class="empty-chart">Sin datos vinculados para esta selección.</p>'}</article>`;
   }

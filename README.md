@@ -32,6 +32,10 @@ La implementación anterior con FastAPI/SQLite sigue en el repositorio como refe
 
 ## Auditorías desde Databricks
 
+Gerencia presenta únicamente tres estudios: KO moderno, KO tradicional y Lindley. Un Survey único de Databricks tiene prioridad (`ko_mod` / `ko_moderno`, `ko_trad` / `ko_tradicional`, `lindley`); sin cruce único, Canal del Excel separa los KO modernos y tradicionales. Se conserva Estudio Excel como fuente original y las correcciones manuales explícitas. Si no hay evidencia suficiente, el ticket permanece en los totales sin inventar un estudio.
+
+Resumen ejecutivo e Indicadores detallados incluyen el evolutivo mensual de PQR registradas, aplican y no aplican, con tabla de valores y sin dictamen para reconciliar el total. Usa el mes de la Ola con los mismos respaldos del filtro, no el mes de recepción. Respeta todos los filtros, excluye RDG/EDC y muestra meses intermedios sin actividad en cero; los registros sin periodo quedan identificados como Sin mes.
+
 La sincronización replica el patrón de Portal de Validación: Databricks envía los datos, no se guarda un token personal de Databricks en Supabase. El trabajo independiente `1057185433641838` usa Reporting Cluster a las **6:00 y 14:00 de America/Bogota**. Consulta solo los ID originales y nuevos vinculados a tickets activos y los 14 campos solicitados, con Ola desde 2026 y Survey KO o Lindley. No modifica la tabla de origen ni el trabajo de Validación.
 
 Gerencia lee el último corte desde Supabase; «Actualizar panel» no inicia un clúster ni una nueva consulta a Databricks. Las estadísticas cuentan PQR por auditoría original, sin mezclar RDG/EDC ni atribuir coincidencias múltiples arbitrariamente. «Ver auditoría» muestra original y nueva. «Pendiente de sincronización» no equivale a «Sin datos»: esto último requiere una consulta exitosa sin coincidencias. Cada auditoría conserva su hora de corte. Los nuevos tickets esperan al siguiente horario; si falla un lote se conserva su corte anterior.

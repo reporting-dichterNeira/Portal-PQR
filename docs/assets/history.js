@@ -12,7 +12,18 @@ window.PQRHistory = (() => {
     const n=months.findIndex(m=>s.includes(m)||s.split(/\W+/).includes(m.slice(0,3)));
     return n<0?'':`${year}-${String(n+1).padStart(2,'0')}`;
   };
-  const study = v => /lindley/i.test(text(v))?'Lindley':/ko[_ ]moderno/i.test(text(v))?'KO moderno':/ko[_ ]trad/i.test(text(v))?'KO tradicional':text(v);
+  const studies = ['KO moderno','KO tradicional','Lindley'];
+  // Survey is parsed without a channel. For Excel fallback, Canal disambiguates KO.
+  const study = (value,channel='') => {
+    const s=norm(value).replace(/[_-]+/g,' '),c=norm(channel);
+    if(/\blindley\b/.test(s))return 'Lindley';
+    if(s&&!/\bko\b/.test(s))return '';
+    if(/\bmod(?:erno)?\b/.test(c))return 'KO moderno';
+    if(/\btrad(?:icional)?\b/.test(c))return 'KO tradicional';
+    if(/\bko\s+mod(?:erno)?\b/.test(s))return 'KO moderno';
+    if(/\bko\s+trad(?:icional)?\b/.test(s))return 'KO tradicional';
+    return '';
+  };
   const country = v => /guatemala/i.test(text(v))?'Guatemala':({peru:'Perú',panama:'Panamá','republica dominicana':'República Dominicana','r. dominicana':'República Dominicana',colombia:'Colombia',honduras:'Honduras','el salvador':'El Salvador',nicaragua:'Nicaragua',bolivia:'Bolivia',paraguay:'Paraguay','costa rica':'Costa Rica',ecuador:'Ecuador',chile:'Chile'})[norm(v)]||text(v);
   function sourceMonth(v) {
     const date=[v['Fecha de auditoría'],v['Fecha de solicitud'],v['Fecha de resolución']].map(text).find(x=>/^20\d{2}-/.test(x));
@@ -33,7 +44,7 @@ window.PQRHistory = (() => {
     return {
       origin:'historical',requestType:'PQR',code:`PQR-HIS-${month(unique?.Ola)||sourceMonth(v)||'SIN-MES'}-${record.row}`,sourceRow:record.row,sourceId:text(v.ID),
       auditOriginal:audit,audit:'',pdv:unique?id(unique.ID_de_PDV)||id(v['ID PDV']):id(v['ID PDV']),
-      country:country(unique?.pais||v['País campo']),client:study(unique?.Survey||v.Estudio),
+      country:country(unique?.pais||v['País campo']),client:study(unique?.Survey)||study(v.Estudio,v.Canal),
       reportingMonth:month(unique?.Ola)||sourceMonth(v),monthSource:month(unique?.Ola)?'Databricks':'Excel',excelMonth:text(v.Mes),
       createdAt:/^20\d{2}-/.test(text(v['Fecha de solicitud']))?text(v['Fecha de solicitud']):null,
       closedAt:/^20\d{2}-/.test(text(v['Fecha de resolución']))?text(v['Fecha de resolución']):null,
@@ -51,11 +62,15 @@ window.PQRHistory = (() => {
     const m=window.PQRAudits?.match(t,lookup),row=m?.status==='found'?m.rows[0]:null;
     t.reportingMonth=month(row?.Ola)||t.reportingMonth||(t.origin==='platform'?text(t.createdAt).slice(0,7):'');
     t.monthSource=month(row?.Ola)?'Databricks':t.monthSource||(t.origin==='platform'?'Radicación':'Excel');
-    if(row){t.client=study(row.Survey)||t.client;t.country=country(row.pais)||t.country;t.pdv=id(row.ID_de_PDV)||t.pdv;}
+    const surveyStudy=study(row?.Survey),fallbackStudy=study(t.excelStudy||t.client,t.auditFallback?.canal);
+    t.client=surveyStudy||fallbackStudy;
+    t.studySource=surveyStudy?'Databricks':fallbackStudy?(t.origin==='historical'?'Excel':'Plataforma'):'Sin clasificación';
+    if(row){t.country=country(row.pais)||t.country;t.pdv=id(row.ID_de_PDV)||t.pdv;}
     const fallback={...(t.auditFallback||{})};
     for(const field of ['nombre_usuario','Validador'])if(/^\d+$|^20\d{2}-/.test(text(fallback[field])))fallback[field]='';
     t.auditData={...fallback,...Object.fromEntries(Object.entries(row||{}).filter(([,v])=>text(v)))};
     for(const [key] of editable)if(Object.hasOwn(patch,key)&&!key.startsWith('audit'))t[key]=patch[key];
+    if(Object.hasOwn(patch,'client')){t.client=study(patch.client);t.studySource=t.client?'Manual':'Sin clasificación';}
     if(Object.hasOwn(patch,'reportingMonth'))t.monthSource='Manual';
     for(const [key,field] of [['auditAuditor','nombre_usuario'],['auditValidator','Validador'],['auditCity','ciudad'],['auditRegion','region']])if(Object.hasOwn(patch,key))t.auditData[field]=patch[key];
     t.hasManualData=Object.keys(patch).length>0;t.correction=correction||null;
@@ -73,5 +88,5 @@ window.PQRHistory = (() => {
     const list=tickets.filter(t=>t.dataIssues?.length);
     return `<section class="card"><h2>Datos por completar</h2><p class="sub">${list.length} casos pendientes por ID de auditoría faltante o inválido. No se incluyen solicitudes de plataforma aún abiertas, ni KO moderno de Chile. Tener un ID válido sin cruce, región u otros datos de Databricks no requiere completar este listado. Los tickets permanecen en los indicadores generales.</p><div class="table-wrap"><table class="table"><thead><tr><th>Radicado / origen</th><th>País / estudio</th><th>Mes</th><th>Información pendiente</th><th>Acción</th></tr></thead><tbody>${list.map(t=>`<tr><td>${esc(t.code)}<small>${t.origin==='historical'?`Excel · fila ${t.sourceRow}`:'Plataforma'}</small></td><td>${esc(t.country)}<small>${esc(t.client)}</small></td><td>${esc(t.reportingMonth||'Sin mes')}</td><td>${esc(t.dataIssues.join(' · '))}</td><td><button class="secondary" data-action="complete-data" data-id="${esc(t.id)}">Completar datos</button></td></tr>`).join('')||'<tr><td colspan="5">No hay IDs de auditoría pendientes en esta selección.</td></tr>'}</tbody></table></div></section>`;
   }
-  return {text,norm,id,month,study,country,sourceMonth,auditCandidate,normalize,editable,resolve,pending};
+  return {text,norm,id,month,study,studies,country,sourceMonth,auditCandidate,normalize,editable,resolve,pending};
 })();

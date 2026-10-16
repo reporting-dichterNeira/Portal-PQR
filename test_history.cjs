@@ -2,12 +2,12 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const context=vm.createContext({window:{}});
 for(const file of ['audits','history','reports'])vm.runInContext(fs.readFileSync(`docs/assets/${file}.js`,'utf8'),context);
 const h=context.window.PQRHistory,r=context.window.PQRReports;
-const source={row:99,values:{ID:1,'ID de auditoría':'123','ID PDV':'0012',Estudio:'KO',Mes:'SEPTIEMBRE','Fecha de solicitud':'2026-10-01T00:00:00',Status:'CERRADO',Procede:'SI',Tipificacion:'Disponibilidad','Adjudicable a':'OPS Campo | Validación','Quien responde el PQR':'Analista de ejemplo','País campo':'Peru'}};
+const source={row:99,values:{ID:1,'ID de auditoría':'123','ID PDV':'0012',Estudio:'KO',Canal:'TRADICIONAL',Mes:'SEPTIEMBRE','Fecha de solicitud':'2026-10-01T00:00:00',Status:'CERRADO',Procede:'SI',Tipificacion:'Disponibilidad','Adjudicable a':'OPS Campo | Validación','Quien responde el PQR':'Analista de ejemplo','País campo':'Peru'}};
 const row={ID_de_audito:'123',ID_de_PDV:'0012',Ola:'AGO 2026',Survey:'ko_moderno_co_202608',pais:'Colombia',nombre_usuario:'Auditor de ejemplo',Validador:'Validador de ejemplo',ciudad:'Bogotá',region:'Centro'};
 test('mes y estudio de Databricks prevalecen; sin cruce, Excel; nunca fecha de radicación',()=>{
  const found=h.normalize(source,[row]),missing=h.normalize(source,[]);
  assert.equal(found.reportingMonth,'2026-08');assert.equal(found.monthSource,'Databricks');assert.equal(found.client,'KO moderno');
- assert.equal(missing.reportingMonth,'2026-09');assert.equal(missing.client,'KO');assert.equal(missing.excelMonth,'SEPTIEMBRE');
+ assert.equal(missing.reportingMonth,'2026-09');assert.equal(missing.client,'KO tradicional');assert.equal(missing.excelMonth,'SEPTIEMBRE');
  assert.equal(h.normalize(source,[row,{...row,Ola:'SEP 2026'}]).reportingMonth,'2026-09');
  assert.equal(h.month('SEP 2026'),'2026-09');assert.equal(h.month('2026-13'),'');assert.equal(h.month('sin mes'),'');
 });
@@ -20,13 +20,13 @@ test('columnas desplazadas se advierten, sin crear un nombre de analista numéri
 test('corrección manual tiene procedencia y no muta la fuente ni simula un cruce',()=>{
  const original=h.normalize(source,[]),lookup={loaded:true,entries:{123:{rows:[]}}};
  const t=h.resolve(original,lookup,{patch:{client:'KO tradicional',auditCity:'Lima',reviewed:true},updated_at:'2026-10-15',reason:'Fuente confirmada'});
- assert.equal(original.client,'KO');assert.equal(t.client,'KO tradicional');assert.equal(t.auditData.ciudad,'Lima');assert.equal(t.matchStatus,'not_found');assert.equal(t.hasManualData,true);
+ assert.equal(original.client,'KO tradicional');assert.equal(t.client,'KO tradicional');assert.equal(t.auditData.ciudad,'Lima');assert.equal(t.matchStatus,'not_found');assert.equal(t.hasManualData,true);
  assert.equal(t.dataIssues.length,0);assert.ok(!t.dataIssues.includes('Sin datos'));
  assert.equal(h.resolve(original,lookup,{patch:{auditOriginal:'456'}}).auditOriginal,'456');
 });
 test('filtros globales combinan origen, país, estudio, mes, estado y analista en ambas hojas',()=>{
  const a=h.resolve(h.normalize(source,[]),{}),b={...a,id:'second',origin:'platform',reportingMonth:'2026-10'};
- const f={origin:'historical',country:'Perú',month:'2026-09',study:'KO',status:'Cerrado',analyst:'Analista de ejemplo'};
+ const f={origin:'historical',country:'Perú',month:'2026-09',study:'KO tradicional',status:'Cerrado',analyst:'Analista de ejemplo'};
  assert.equal(r.filterTickets([a,b],f).length,1);
  for(const view of ['overview','details','pending']){
    const html=r.render([a,b],[],{}, {...f,view});assert.match(html,/manager-month-filter/);assert.match(html,/manager-origin-filter/);assert.match(html,/Datos por completar/);
@@ -93,12 +93,12 @@ test('plataforma abierta no aparece; al cerrar solo aparece si le falta el ID',(
  assert.equal(h.resolve({...base,status:'Cerrado',auditOriginal:'123'},{loaded:true,entries:{123:{rows:[]}}}).dataIssues.length,0);
 });
 test('KO moderno Chile no requiere cruce ni entra en pendientes, pero el ticket se conserva',()=>{
- const t=h.resolve({...h.normalize(source,[]),country:'Chile',client:'KO moderno',auditOriginal:''},{});
+ const t=h.resolve({...h.normalize(source,[]),country:'Chile',client:'KO moderno',excelStudy:'KO moderno',auditFallback:{canal:'MODERNO'},auditOriginal:''},{});
  assert.equal(t.dataIssues.length,0);assert.equal(context.window.PQRAudits.match(t,{}).status,'excluded');
  const stats=context.window.PQRAudits.stats([t],{});assert.equal(stats.total,1);assert.equal(stats.excluded,1);assert.equal(stats.notFound,0);
  assert.equal(r.summarize([t]).total,1);assert.ok(r.render([t],[],{},{}).includes(t.code));
  assert.equal(h.resolve({...t,country:'Perú'},{}).dataIssues.length,1);
- assert.equal(h.resolve({...t,client:'KO tradicional'},{}).dataIssues.length,1);
+ assert.equal(h.resolve({...t,client:'KO tradicional',excelStudy:'KO tradicional',auditFallback:{canal:'TRADICIONAL'}},{}).dataIssues.length,1);
  const excel=h.resolve({...t,client:'KO',auditFallback:{canal:'MODERNO'}},{});assert.equal(excel.dataIssues.length,0);
 });
 test('normalización crea un radicado del mes correcto, no reutiliza septiembre',()=>{

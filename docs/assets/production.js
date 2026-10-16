@@ -303,7 +303,14 @@
     const fieldValue=key=>({auditAuditor:ticket.auditData?.nombre_usuario,auditValidator:ticket.auditData?.Validador,auditCity:ticket.auditData?.ciudad,auditRegion:ticket.auditData?.region})[key]??ticket[key]??'';
     const fields=h.editable.filter(([key])=>key!=='auditOriginal'||ticket.origin==='historical');
     modal(`Completar datos · ${ticket.code}`,`<p class="sub">Solo cambia indicadores; no modifica el Excel ni el trámite original. Deja el valor actual si no tienes una corrección confirmada.</p><form id="reporting-form" class="form-grid">${fields.map(([key,label])=>`<label>${esc(label)}${key==='applies'?`<select name="${key}"><option value="">Sin dato</option>${['Aplica','No Aplica'].map(v=>`<option ${fieldValue(key)===v?'selected':''}>${v}</option>`).join('')}</select>`:`<input name="${key}" value="${esc(fieldValue(key))}" maxlength="300" ${key==='reportingMonth'?'type="month"':key==='pdv'||key==='auditOriginal'?'inputmode="numeric" data-numeric pattern="[0-9]{1,30}"':''}>`}</label>`).join('')}<label class="full">Motivo de la corrección<textarea name="reason" minlength="5" maxlength="1000" required></textarea></label><div class="actions full"><button class="primary" type="submit">Guardar datos de indicadores</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
-    const form=$('#reporting-form');form.onsubmit=async event=>{
+    const form=$('#reporting-form');
+    const studyInput=form.elements.client;
+    if(studyInput){
+      const selector=document.createElement('select');selector.name='client';
+      selector.innerHTML='<option value="">Sin clasificar</option>'+h.studies.map(name=>`<option ${ticket.client===name?'selected':''}>${esc(name)}</option>`).join('');
+      studyInput.replaceWith(selector);
+    }
+    form.onsubmit=async event=>{
       event.preventDefault();await submit(form,async()=>{
         const values=formData(form),patch={...(old?.patch||{})};
         for(const [key] of fields){const value=String(values[key]||'').trim();if(value!==String(fieldValue(key)))patch[key]=value;}

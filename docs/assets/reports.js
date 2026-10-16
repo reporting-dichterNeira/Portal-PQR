@@ -23,11 +23,41 @@ window.PQRReports = (() => {
     const closed=own.filter(t=>closedStatuses.has(t.status)).length;
     return {name,total:own.length,closed,open:own.length-closed,aplica:own.filter(t=>t.applies==='Aplica').length,noAplica:own.filter(t=>t.applies==='No Aplica').length,rate:pct(closed,own.length)};
   });
-  const trend = tickets => {
+  function monthlyTrend(tickets) {
     const counts=new Map();
-    for(const t of tickets){if(!t.createdAt)continue;const key=String(t.createdAt).slice(0,10);counts.set(key,(counts.get(key)||0)+1)}
-    return [...counts].sort((a,b)=>a[0].localeCompare(b[0])).slice(-10).map(([name,count])=>({name:new Date(`${name}T12:00:00`).toLocaleDateString('es-CO',{day:'2-digit',month:'short'}),count}));
-  };
+    for(const t of tickets){
+      if(requestType(t)!=='PQR')continue;
+      const candidate=t.reportingMonth||(t.origin==='historical'?'':String(t.createdAt||'').slice(0,7));
+      const key=/^20\d{2}-(0[1-9]|1[0-2])$/.test(candidate)?candidate:'Sin mes';
+      if(!counts.has(key))counts.set(key,{month:key,total:0,aplica:0,noAplica:0,pending:0});
+      const row=counts.get(key);row.total++;
+      if(t.applies==='Aplica')row.aplica++;else if(t.applies==='No Aplica')row.noAplica++;else row.pending++;
+    }
+    const keys=[...counts.keys()].filter(k=>k!=='Sin mes').sort();
+    // Keep zero-activity months visible, rather than drawing adjacent non-adjacent periods.
+    if(keys.length){
+      const end=keys.at(-1);let key=keys[0];
+      while(key<=end){
+        if(!counts.has(key))counts.set(key,{month:key,total:0,aplica:0,noAplica:0,pending:0});
+        const [year,month]=key.split('-').map(Number);
+        key=month===12?`${year+1}-01`:`${year}-${String(month+1).padStart(2,'0')}`;
+      }
+    }
+    return [...counts.values()].sort((a,b)=>a.month==='Sin mes'?1:b.month==='Sin mes'?-1:a.month.localeCompare(b.month));
+  }
+  function monthlyChart(tickets) {
+    const rows=monthlyTrend(tickets),dated=rows.filter(r=>r.month!=='Sin mes');
+    const label=key=>key==='Sin mes'?key:new Date(`${key}-01T12:00:00`).toLocaleDateString('es-CO',{month:'short',year:'numeric'});
+    const series=[{key:'total',name:'PQR registradas',color:'#0d5cab',dash:''},{key:'aplica',name:'Aplican',color:'#16703c',dash:'8 4'},{key:'noAplica',name:'No aplican',color:'#9d316f',dash:'2 4'}];
+    const w=Math.max(780,dated.length*90),h=290,left=62,right=w-35,top=32,bottom=236;
+    const max=Math.max(4,Math.ceil(Math.max(...dated.map(r=>r.total),1)/4)*4),x=i=>dated.length===1?(left+right)/2:left+i*(right-left)/(dated.length-1),y=value=>bottom-value/max*(bottom-top);
+    const svg=dated.length?`<div class="monthly-chart-scroll"><svg class="monthly-chart" viewBox="0 0 ${w} ${h}" style="min-width:${w}px" role="img" aria-label="Evolutivo mensual de PQR registradas, aplican y no aplican. Valores exactos en la tabla inferior.">
+      ${Array.from({length:5},(_,i)=>{const value=Math.ceil(max*i/4),yy=y(value);return `<line x1="${left}" y1="${yy}" x2="${right}" y2="${yy}" stroke="#dce3ec"/><text x="${left-12}" y="${yy+4}" text-anchor="end">${fmt(value)}</text>`;}).join('')}
+      ${dated.map((r,i)=>`<text x="${x(i)}" y="${bottom+28}" text-anchor="middle">${escapeHtml(label(r.month))}</text>`).join('')}
+      ${series.map(s=>`<polyline points="${dated.map((r,i)=>`${x(i)},${y(r[s.key])}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="3" stroke-dasharray="${s.dash}"/>${dated.map((r,i)=>`<circle cx="${x(i)}" cy="${y(r[s.key])}" r="4" fill="white" stroke="${s.color}" stroke-width="2"><title>${escapeHtml(label(r.month))} · ${s.name}: ${fmt(r[s.key])}</title></circle>`).join('')}`).join('')}
+    </svg></div>`:'<p class="empty-chart">No hay PQR con mes identificado en esta selección.</p>';
+    return `<section class="card manager-card monthly-panel" aria-label="Evolutivo mensual de PQR"><div class="card-heading"><h2>Evolutivo mensual de PQR</h2><small>Mes de auditoría · Ola / respaldo del Excel</small></div><p class="sub">Respeta los filtros superiores. Solo PQR, sin redigitaciones directas ni ediciones. Las PQR sin dictamen cuentan en el total, no en «No aplican». El periodo es el mes de la auditoría, no la fecha de recepción.</p><div class="monthly-legend">${series.map(s=>`<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>${svg}<div class="table-wrap"><table class="table monthly-table"><caption>Volumen y resultado por mes de auditoría</caption><thead><tr><th>Mes</th><th>PQR registradas</th><th>Aplican</th><th>No aplican</th><th>Sin dictamen</th></tr></thead><tbody>${rows.map(r=>`<tr><th scope="row">${escapeHtml(label(r.month))}</th><td>${fmt(r.total)}</td><td>${fmt(r.aplica)}</td><td>${fmt(r.noAplica)}</td><td>${fmt(r.pending)}</td></tr>`).join('')||'<tr><td colspan="5">No hay PQR para esta selección.</td></tr>'}</tbody></table></div></section>`;
+  }
 
   function summarize(tickets,users=[],staff={}) {
     const decided=tickets.filter(t=>t.applies==='Aplica'||t.applies==='No Aplica');
@@ -84,9 +114,10 @@ window.PQRReports = (() => {
   function renderDetails(tickets,allTickets,users,staff,filters) {
     const s=summarize(tickets,users,staff);
     return `<section class="card"><h2>Indicadores detallados</h2><p class="sub">Los indicadores y todas las descargas respetan los filtros superiores. Los históricos sin horarios fiables no se incluyen en el cierre promedio.</p></section>
+      ${monthlyChart(tickets)}
       ${window.PQRAudits?.render(tickets,filters.auditLookup)||''}
       <section class="metrics dashboard-metrics detail-metrics" aria-label="Indicadores detallados">${metric('Solicitudes del segmento',fmt(s.total))}${metric('Tasa de cierre',`${pct(s.closed,s.total)}%`,`${fmt(s.closed)} cerradas`)}${metric('En gestión',fmt(s.open))}${metric('Aplican',fmt(s.aplica),`${pct(s.aplica,s.decided)}% de dictámenes`)}${metric('No aplican',fmt(s.noAplica))}${metric('Redigitación pendiente',fmt(s.redigit))}${metric('Verificación pendiente',fmt(s.verification))}${metric('Cierre promedio',s.avgClosure===null?'—':`${s.avgClosure} h`)}${metric('Solicitudes directas',fmt(s.direct))}</section>
-      <section class="manager-grid" aria-label="Gráficas de indicadores detallados"><article class="card manager-card"><div class="card-heading"><h2>Estado del segmento</h2><small>Distribución actual</small></div>${bars(statusRows(s.statuses),'#0d5cab')}</article><article class="card manager-card"><div class="card-heading"><h2>Evolución de radicados</h2><small>Últimas 10 fechas con actividad</small></div>${bars(trend(tickets),'#33bdee')}</article><article class="card manager-card"><div class="card-heading"><h2>Tipologías</h2><small>Casos dictaminados</small></div>${bars(s.tipologies,'#6d37a9')}</article><article class="card manager-card"><div class="card-heading"><h2>Áreas adjudicables</h2><small>Responsabilidad asignada</small></div>${bars(s.areas,'#14a83b')}</article></section>
+      <section class="manager-grid" aria-label="Gráficas de indicadores detallados"><article class="card manager-card"><div class="card-heading"><h2>Estado del segmento</h2><small>Distribución actual</small></div>${bars(statusRows(s.statuses),'#0d5cab')}</article><article class="card manager-card"><div class="card-heading"><h2>Tipologías</h2><small>Casos dictaminados</small></div>${bars(s.tipologies,'#6d37a9')}</article><article class="card manager-card"><div class="card-heading"><h2>Áreas adjudicables</h2><small>Responsabilidad asignada</small></div>${bars(s.areas,'#14a83b')}</article></section>
       <section class="manager-grid" aria-label="Comparativo por país y estudio"><article class="card manager-card"><div class="card-heading"><h2>Desglose por país</h2><small>Volumen y resultado</small></div>${breakdownTable(breakdown(tickets,'country'))}</article><article class="card manager-card"><div class="card-heading"><h2>Desglose por estudio</h2><small>Volumen y resultado</small></div>${breakdownTable(breakdown(tickets,'client'))}</article></section>
       <section class="card manager-card"><div class="card-heading"><h2>Casos incluidos en el análisis</h2><small>${fmt(tickets.length)} solicitudes</small></div><div class="table-wrap"><table class="table detail-table"><thead><tr><th>Radicado</th><th>País</th><th>Estudio</th><th>Estado</th><th>Dictamen</th><th>Tipología</th><th>Auditoría</th></tr></thead><tbody>${tickets.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(t=>`<tr><td>${escapeHtml(t.code)}</td><td>${escapeHtml(t.country)}</td><td>${escapeHtml(t.client)}</td><td>${escapeHtml(statusLabel(t.status))}</td><td>${escapeHtml(t.applies||'Pendiente')}</td><td>${escapeHtml(t.tipology||'—')}</td>${window.PQRAudits?.cell(t,filters.auditLookup)||'<td>Sin consultar</td>'}</tr>`).join('')||'<tr><td colspan="7">No hay solicitudes para esta selección.</td></tr>'}</tbody></table></div></section>`;
   }
@@ -95,7 +126,8 @@ window.PQRReports = (() => {
     const s=summarize(selected,users,staff);
     const view=['details','pending'].includes(filters.view)?filters.view:'overview';
     const select=(key,label,values)=>`<label>${label}<select id="manager-${key}-filter"><option value="all">Todos</option>${values.map(([value,name])=>`<option value="${escapeHtml(value)}" ${filters[key]===value?'selected':''}>${escapeHtml(name)}</option>`).join('')}</select></label>`;
-    const values=field=>group(tickets,field).map(r=>[r.name,r.name]);
+    const studies=['KO moderno','KO tradicional','Lindley'].map(name=>[name,name]);
+    const values=field=>field==='client'?studies:group(tickets,field).map(r=>[r.name,r.name]);
     const months=[...new Set(tickets.map(t=>t.reportingMonth).filter(Boolean))].sort().reverse().map(m=>[m,m]);
     const analysts=[...new Map(tickets.map(t=>[t.analystName||t.validatorPersonId,t.analystName||staff.validators?.find(v=>v.id===t.validatorPersonId)?.name]).filter(([id,name])=>id&&name)).entries()];
     const shell=`<div class="topline manager-title"><div><span class="eyebrow">GERENCIA · SOLICITUDES</span><h1>Dashboard de gestión</h1><p class="sub">PQR históricas y solicitudes de la plataforma, con origen identificado.</p></div><div><div class="actions export-actions"><button class="ghost" data-action="export-pdf">Descargar PDF ejecutivo</button><button class="secondary" data-action="export-summary">Excel resumen</button><button class="primary" data-action="export-cases">Excel casos</button></div><p id="export-status" class="export-status" role="status" aria-live="polite"></p></div></div><nav class="manager-tabs" aria-label="Hojas de Gerencia">${[['overview','Resumen ejecutivo'],['details','Indicadores detallados'],['pending','Datos por completar']].map(([key,label])=>`<button class="${view===key?'active':''}" data-action="manager-view" data-manager-view="${key}" aria-current="${view===key?'page':'false'}">${label}</button>`).join('')}</nav><section class="card manager-global-filters" aria-label="Filtros del dashboard">${select('country','País',values('country'))}${select('study','Estudio',values('client'))}${select('month','Mes de auditoría',months)}${select('origin','Origen',[['historical','Histórico (Excel)'],['platform','Plataforma']])}${select('type','Tipo de solicitud',Object.entries(requestLabels))}${select('status','Estado',values('status').map(([v])=>[v,statusLabel(v)]))}${select('analyst','Analista de PQR',analysts)}<div><button class="ghost" data-action="reset-manager-filters">Limpiar filtros</button><small role="status">${fmt(selected.length)} de ${fmt(tickets.length)} solicitudes</small></div><p class="sub full">Mes = Ola de Databricks; si no cruza, mes del Excel en históricos y fecha de radicación en plataforma. Las correcciones manuales tienen prioridad y quedan identificadas. El histórico se conserva cerrado y no genera avisos ni SLA.</p></section>`;
@@ -105,7 +137,7 @@ window.PQRReports = (() => {
     const validatorRows=s.validators.map(v=>`<tr><td>${escapeHtml(v.name)}<small>${v.active===null?'Histórico / dato de reporte':v.active?'Activo':'Inactivo'}</small></td><td>${fmt(v.assigned)}</td><td>${fmt(v.decided)}</td><td>${fmt(v.closed)}</td></tr>`).join('');
     const redigitatorRows=s.redigitators.map(v=>`<tr><td>${escapeHtml(v.name)}<small>${v.active?'Activo':'Inactivo'}</small></td><td>${fmt(v.assigned)}</td><td>${fmt(v.completed)}</td><td>${fmt(v.closed)}</td></tr>`).join('');
     const recent=selected.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
-    return `${shell}${auditPanel}
+    return `${shell}${monthlyChart(selected)}${auditPanel}
       <section class="metrics dashboard-metrics" aria-label="Indicadores principales">
         ${metric('Solicitudes radicadas',fmt(s.total))}${metric('En gestión',fmt(s.open))}${metric('Cerradas',fmt(s.closed),`${pct(s.closed,s.total)}% del total`)}${metric('Aplican',fmt(s.aplica),`${pct(s.aplica,s.decided)}% dictaminadas`)}${metric('No aplican',fmt(s.noAplica),`${pct(s.noAplica,s.decided)}% dictaminadas`)}${metric('Redigitación pendiente',fmt(s.redigit))}${metric('Por verificar',fmt(s.verification))}${metric('Con área adjudicable',fmt(s.adjudicable))}${metric('Tiempo medio de cierre',s.avgClosure===null?'—':`${s.avgClosure} h`)}
       </section>
@@ -186,5 +218,5 @@ window.PQRReports = (() => {
     for(const cell of Object.values(ws))if(cell&&cell.t==='d')cell.z='dd/mm/yyyy hh:mm:ss';
     XLSX.utils.book_append_sheet(wb,ws,'Casos');XLSX.writeFile(wb,`PQR_casos_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
-  return {statusLabel,summarize,filterTickets,render,pdf,excelSummary,excelCases};
+  return {statusLabel,summarize,filterTickets,monthlyTrend,render,pdf,excelSummary,excelCases};
 })();
