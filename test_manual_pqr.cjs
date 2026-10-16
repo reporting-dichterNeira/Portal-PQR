@@ -25,7 +25,7 @@ function portal(role = 'validador', users) {
     modal: (title, html) => dialogs.push({ title, html }),
     attachmentField: () => '<input name="attachments" type="file" multiple>',
     bindAttachmentSelection: () => {}, checkedAttachments: () => [{ name: 'foto.png' }, { name: 'datos.xlsx' }],
-    formData: () => ({ pdv: '00123', commercialName: 'María Pérez', description: 'Solicitud recibida por correo', clientOther: 'extra', attachments: 'fake' }),
+    formData: () => ({ pdv: '00123', externalTicketId: 'TK-00123', description: 'Solicitud recibida por correo', clientOther: 'extra', attachments: 'fake' }),
     submit: async (_form, task) => task(),
     uploadAttachments: async (ticket, files) => { uploads.push({ ticket, files }); return []; },
     showError: error => errors.push(error.message),
@@ -41,21 +41,21 @@ function portal(role = 'validador', users) {
 }
 
 for (const role of ['validador', 'gerente']) {
-  test(`${role}: radica con nombre comercial opcional, trazabilidad y varios adjuntos`, async () => {
+  test(`${role}: radica con referencia de ticket, datos pendientes, trazabilidad y varios adjuntos`, async () => {
     const p = portal(role);
     vm.runInContext('newTicket("PQR", true)', p.context);
     const { html, title } = p.dialogs[0];
     assert.equal(title, 'Nueva PQR manual');
-    assert.match(html, /Comercial asociado/);
-    assert.match(html, /Comercial asociado \(opcional\)<input name="commercialName"/);
-    assert.doesNotMatch(html, /name="commercialId"/);
-    assert.doesNotMatch(html, /name="commercialName"[^>]*required/);
+    assert.match(html, /ID de ticket \(opcional\)<input name="externalTicketId"/);
+    assert.doesNotMatch(html, /name="commercialId"|name="commercialName"/);
+    assert.doesNotMatch(html, /name="pdv"[^>]*required|name="description"[^>]*required/);
     assert.doesNotMatch(html, /Canal de recepción|name="source"/);
-    assert.match(html, /data-numeric required maxlength="80"/);
+    assert.match(html, /ID de PDV \(opcional\)/);assert.match(html,/Descripción \(opcional\)/);
+    assert.match(html, /data-numeric maxlength="80"/);
     assert.match(html, /type="file" multiple/);
     await p.form.onsubmit({ preventDefault() {} });
     assert.equal(p.calls[0].name, 'pqr_create_manual');
-    assert.equal(p.calls[0].p_data.commercialName, 'María Pérez');
+    assert.equal(p.calls[0].p_data.externalTicketId, 'TK-00123');
     assert.equal(p.calls[0].p_data.source, 'Otro');
     assert.ok(!('commercialId' in p.calls[0].p_data));
     assert.equal(p.calls[0].p_data.client, 'Estudio especial');
@@ -76,6 +76,8 @@ test('Comercial conserva radicación propia; otros roles no pueden abrir el form
   const commercial = portal('comercial');
   vm.runInContext('newTicket("PQR")', commercial.context);
   assert.doesNotMatch(commercial.dialogs[0].html, /name="commercialId"/);
+  assert.match(commercial.dialogs[0].html,/name="pdv"[^>]*required/);
+  assert.match(commercial.dialogs[0].html,/name="description"[^>]*required minlength="8"/);
   await commercial.form.onsubmit({ preventDefault() {} });
   assert.equal(commercial.calls[0].name, 'create');
   const analyst = portal();
@@ -83,14 +85,14 @@ test('Comercial conserva radicación propia; otros roles no pueden abrir el form
   assert.equal(analyst.dialogs.length, 0);
 });
 
-test('sin cuentas Comerciales permite abrir y radicar sin nombre', async () => {
+test('sin cuentas Comerciales permite radicar con PDV y descripción pendientes', async () => {
   const p = portal('gerente', []);
-  p.context.formData = () => ({pdv:'00123',description:'Solicitud externa sin comercial',commercialName:''});
+  p.context.formData = () => ({pdv:'',description:'',externalTicketId:''});
   vm.runInContext('newTicket("PQR", true)', p.context);
   assert.equal(p.dialogs.length, 1);
   await p.form.onsubmit({preventDefault(){}});
   assert.equal(p.errors.length, 0);
-  assert.equal(p.calls[0].p_data.commercialName, '');
+  assert.equal(p.calls[0].p_data.externalTicketId, '');assert.equal(p.calls[0].p_data.pdv, '');assert.equal(p.calls[0].p_data.description, '');
 });
 
 test('botón manual en Analistas y en ambas hojas de Gerencia', () => {
@@ -126,7 +128,7 @@ test('adjuntos solo para Comercial titular o creador manual con rol válido', ()
 test('el campo libre no interpola nombres de cuentas registradas', () => {
   const p = portal('validador', [{ id: 'c', name: '<script>', username: 'c"', role: 'comercial', active: true }]);
   vm.runInContext('newTicket("PQR", true)', p.context);
-  assert.match(p.dialogs[0].html, /name="commercialName"/);
+  assert.match(p.dialogs[0].html, /name="externalTicketId"/);
   assert.doesNotMatch(p.dialogs[0].html, /<script>/);
 });
 
