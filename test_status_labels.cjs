@@ -15,6 +15,7 @@ vm.runInContext(fs.readFileSync('docs/assets/reports.js', 'utf8'), context);
 context.PQRReports = context.window.PQRReports;
 context.esc = value => String(value ?? '');
 context.requestType = () => 'PQR';
+context.canEditManualPqr = () => false;
 vm.runInContext(source.slice(source.indexOf('  function badge('), source.indexOf('  function metric(')) + source.slice(source.indexOf('  function ticketActions('), source.indexOf('  function commercial(')), context);
 const ticket = { id: 'test', code: 'PQR-2026-0019', status: 'En Validación', validatorPersonId: 'analyst', client: 'KO tradicional', country: 'El Salvador', createdAt: '2026-10-13T16:46:00Z' };
 const reports = context.PQRReports;

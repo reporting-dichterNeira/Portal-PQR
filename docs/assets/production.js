@@ -18,10 +18,13 @@
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
+  const analystFilters = { country: 'all', study: 'all', month: 'all', origin: 'all', type: 'all', status: 'all', analyst: 'all' };
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
   const manualPqrRoles = ['validador', 'gerente'];
   const canCreateManualPqr = () => manualPqrRoles.includes(state.me?.role);
+  const canEditManualPqr = ticket => ticket?.manualEntry === true && requestType(ticket) === 'PQR' && !ticket.deletedAt &&
+    (state.me?.role === 'validador' || (state.me?.role === 'gerente' && ticket.createdBy === state.me.id));
   const canAddAttachments = ticket => !ticket.deletedAt && (
     (state.me.role === 'comercial' && ticket.commercial === state.me.id) ||
     (canCreateManualPqr() && ticket.manualEntry === true && ticket.createdBy === state.me.id)
@@ -228,7 +231,7 @@
       db.from('pqr_profiles').select('id,username,name,role,active').order('name'),
       db.from('pqr_staff').select('*').order('name'),
       db.from('pqr_tips').select('name,suggested_area').order('name'),
-      db.from('pqr_tickets').select('id,deleted_at,data').order('created_at', { ascending: false }),
+      db.from('pqr_tickets').select('id,deleted_at,updated_at,data').order('created_at', { ascending: false }),
       db.from('pqr_notifications').select('*').order('created_at', { ascending: false }).limit(100),
       db.from('pqr_contact_emails').select('profile_id,email').order('email'),
     ]);
@@ -244,7 +247,7 @@
       staff: { validators: staff.filter(person => person.role === 'validador'), redigitators: staff.filter(person => person.role === 'redigitador') },
       tips: tips.map(item => item.name),
       tipAreas: Object.fromEntries(tips.map(item => [item.name, item.suggested_area || ''])),
-      tickets: cases.filter(item => !item.deleted_at).map(item => item.data),
+      tickets: cases.filter(item => !item.deleted_at).map(item => ({ ...item.data, recordUpdatedAt: item.updated_at })),
       deleted: cases.filter(item => item.deleted_at).map(item => ({ ...item.data, deletedAt: item.deleted_at })),
       notifications, historical:historical.map(row=>row.data), overrides,
     };
@@ -264,6 +267,7 @@
   }
   function renderLogin(message = '') {
     auditLookup = window.PQRAudits?.empty(); auditLookupOwner = null;
+    for (const key of Object.keys(analystFilters)) analystFilters[key] = 'all';
     $('#app').innerHTML = $('#login-template').innerHTML;
     if (message) $('#login-message').textContent = message;
     $('#login-form').onsubmit = async event => {
@@ -291,16 +295,16 @@
     return admin();
   }
   function ticketTable(cases, role) {
-    const selected = listTypes[role] || 'all';
+    const selected = role === 'validador' ? 'all' : listTypes[role] || 'all';
     const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
-    const filter = `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
+    const filter = role === 'validador' ? '' : `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
     return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
     if (role === 'validador') {
-      let result = '';
+      let result = canEditManualPqr(ticket) ? `<button class="ghost" data-action="edit-manual-pqr" data-id="${esc(ticket.id)}">Editar radicación</button>` : '';
       if (['Radicado', 'Reabierto', 'En Validación', 'Pendiente de Verificación'].includes(ticket.status)) result += `<button class="secondary" data-action="assign-validator" data-id="${ticket.id}">${ticket.validatorPersonId ? 'Reasignar' : 'Asignar'}</button>`;
       if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ['En Validación', 'Reabierto'].includes(ticket.status)) result += `<button class="primary" data-action="dictate" data-id="${ticket.id}">Dictaminar</button>`;
       if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ticket.status === 'Pendiente de Verificación') result += `<button class="primary" data-action="verify" data-id="${ticket.id}">Verificar</button>`;
@@ -316,15 +320,18 @@
     $('#view').innerHTML = `${header('Mis solicitudes', 'Radica PQR, redigitaciones o ediciones de auditoría.', '<button class="secondary" data-action="new-edit">Solicitar edición</button><button class="secondary" data-action="new-direct">Solicitar redigitación directa</button><button class="primary" data-action="new-ticket">Nueva PQR</button>')}<section class="metrics">${metric('Radicadas', cases.length)}${metric('En gestión', cases.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'comercial')}`;
   }
   function analyst() {
-    const cases = state.tickets.filter(ticket => requestType(ticket) === 'PQR');
+    const all = state.tickets.filter(ticket => requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
+    const cases = PQRReports.filterTickets(all, analystFilters);
     $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
+    for (const key of Object.keys(analystFilters)) $('#analyst-'+key+'-filter')?.addEventListener('change', event => { analystFilters[key] = event.target.value; analyst(); });
   }
   function redigitator() {
     const cases = state.tickets.filter(ticket => ticket.redigitador === state.me.id);
     $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
   }
   function dashboard() {
-    $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup });
+    $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup, currentUserId: state.me.id });
     $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
     for(const key of ['type','country','study','month','origin','status','analyst'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
   }
@@ -429,11 +436,28 @@
       if (created && failures.length) alert(`${created.code} se creó correctamente, pero no se pudieron cargar estos adjuntos: ${failures.join(', ')}. Abre Detalle para reintentarlo.`);
     };
   }
+  function editManualPqr(ticket) {
+    if (!canEditManualPqr(ticket)) return;
+    const complete = !!ticket.applies || ['Cerrado', 'No Aplica', 'Pendiente de Redigitación', 'Pendiente de Verificación', 'Devuelto'].includes(ticket.status);
+    const client = clients.includes(ticket.client) ? ticket.client : 'Otros';
+    const choices = (items, current) => items.map(value => `<option value="${esc(value)}" ${value === current ? 'selected' : ''}>${esc(value)}</option>`).join('');
+    modal(`Editar radicación · ${ticket.code}`, `<p class="sub">Corrige los datos de esta PQR manual. Se conservarán el radicado, estado, responsables, adjuntos y fechas del proceso. Cada corrección queda en el paso a paso.</p><form id="edit-manual-form" class="form-grid"><label>ID de ticket (opcional)<input name="externalTicketId" maxlength="100" value="${esc(ticket.externalTicketId)}"></label><label>ID de PDV${complete?'':' (opcional)'}<input name="pdv" inputmode="numeric" pattern="[0-9]{1,80}" maxlength="80" data-numeric ${complete?'required':''} value="${esc(ticket.pdv)}"></label><label>Cliente / estudio<select name="client" required>${choices(clients,client)}</select></label><label>País<select name="country" required>${choices(countries,ticket.country)}</select></label><label class="full ${client==='Otros'?'':'hide'}" id="edit-other-client">¿Cuál otro?<input name="clientOther" maxlength="100" ${client==='Otros'?'required':''} value="${esc(client==='Otros'?ticket.client:'')}"></label><label class="full">Descripción${complete?'':' (opcional)'}<textarea name="description" maxlength="12000" ${complete?'required minlength="8"':''}>${esc(ticket.description)}</textarea></label><label class="full">Motivo de la corrección<textarea name="reason" required minlength="5" maxlength="1000"></textarea></label><div class="actions full"><button class="primary" type="submit">Guardar corrección</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
+    const form = $('#edit-manual-form');
+    form.elements.client.onchange = () => { const other=form.elements.client.value==='Otros'; $('#edit-other-client').classList.toggle('hide',!other); form.elements.clientOther.required=other; };
+    form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => {
+      const values = formData(form);
+      const payload = Object.fromEntries(['externalTicketId','pdv','description','country','reason'].map(key=>[key,String(values[key]||'').trim()]));
+      payload.client = (values.client==='Otros'?values.clientOther:values.client||'').trim();
+      const {error} = await db.rpc('pqr_edit_manual', { p_ticket: ticket.id, p_expected_updated_at: ticket.recordUpdatedAt, p_data: payload });
+      if (error) throw error;
+    }); };
+  }
   function detail(ticket) {
     const events = ticket.timeline || [];
     const canAdd = canAddAttachments(ticket);
     modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')}${requestType(ticket) === 'EDC' ? '' : ` · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}`}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes && requestType(ticket) !== 'EDC' ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}${requestType(ticket) === 'EDC' && ticket.editCompleted !== undefined ? `<p><strong>¿Se editó?</strong> ${ticket.editCompleted ? 'Sí' : 'No'}<br><strong>Comentario:</strong> ${esc(ticket.editComment || '—')}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
     loadAttachments(ticket.id);
+    if (canEditManualPqr(ticket)) $('.case-result')?.insertAdjacentHTML('beforeend', `<button class="secondary" data-action="edit-manual-pqr" data-id="${esc(ticket.id)}">Editar radicación</button>`);
     if (ticket.manualEntry) $('.case-result')?.insertAdjacentHTML('beforeend', `<p><strong>Radicación manual</strong> · <strong>Registrada por:</strong> ${esc(ticket.createdByName || accountName(ticket.createdBy))}<br><strong>ID de ticket de origen:</strong> ${esc(ticket.externalTicketId || 'No indicado')}${ticket.commercialName||ticket.commercial?`<br><strong>Comercial asociado (registro anterior):</strong> ${esc(ticket.commercialName || accountName(ticket.commercial))}`:''}</p>${!ticket.pdv||!ticket.description?'<p class="sub">Información pendiente: el ID de PDV y la descripción deben completarse al dictaminar.</p>':''}`);
     if (canAdd) {
       const form = $('#add-attachments');
@@ -629,6 +653,8 @@
         return;
       }
       if (type === 'detail' && ticket) return detail(ticket);
+      if (type === 'edit-manual-pqr' && ticket) return editManualPqr(ticket);
+      if (type === 'reset-analyst-filters' && state.me.role === 'validador') { for(const key of Object.keys(analystFilters)) analystFilters[key]='all'; return analyst(); }
       if (state.me.role === 'gerente' && type === 'refresh-audits') return await refreshAudits();
       if (state.me.role === 'gerente' && type === 'audit-dimension') {
         const key=window.PQRAudits.dimension(button.dataset.auditDimension)?.key;

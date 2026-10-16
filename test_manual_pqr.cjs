@@ -7,7 +7,7 @@ const section = (start, end) => source.slice(source.indexOf(start), source.index
 
 function portal(role = 'validador', users) {
   const calls = [], dialogs = [], errors = [], uploads = [];
-  const view = { innerHTML: '' };
+  const view = { innerHTML: '', querySelector: () => ({insertAdjacentHTML(){}}) };
   const exports = { insertAdjacentHTML(_where, html) { this.html = html; } };
   const form = { elements: { attachments: {}, client: { value: 'Otros' }, clientOther: { value: 'Estudio especial' } } };
   const state = { me: { id: 'creator', role }, users: users || [
@@ -16,11 +16,11 @@ function portal(role = 'validador', users) {
     { id: 'creator', name: 'Analistas', username: 'analistas', role, active: true },
   ], tickets: [], staff: {} };
   const context = vm.createContext({
-    state, managerState: {}, auditLookup: undefined, managerTickets:()=>[],
+    state, managerState: {}, analystFilters: {}, auditLookup: undefined, managerTickets:()=>[],
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
     clients: ['KO tradicional', 'Otros'], countries: ['Colombia'],
     $: selector => selector === '#case-form' ? form : selector === '#view' ? view : selector === '.export-actions' ? exports : null,
-    PQRReports: { render: () => '<div class="export-actions"></div>' },
+    PQRReports: { render: () => '<div class="export-actions"></div>', filterTickets: tickets=>tickets, listFilters:()=>'' },
     document: {}, options: values => values.map(v => `<option>${v}</option>`).join(''),
     modal: (title, html) => dialogs.push({ title, html }),
     attachmentField: () => '<input name="attachments" type="file" multiple>',
