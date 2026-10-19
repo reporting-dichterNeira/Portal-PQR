@@ -18,9 +18,26 @@ window.PQRNavigation=(()=>{
     };
     return `<section class="module-context ${internal?'is-internal':'is-client'}" aria-label="Ubicación del apartado"><nav aria-label="Ruta de navegación"><a href="#inicio">Inicio</a><span aria-hidden="true"> / </span><strong>${name}</strong><span aria-hidden="true"> / </span><span>${who}</span></nav><p>${descriptions[role]||'Casos del apartado seleccionado.'}</p>${internal?'<a href="#solicitud-interna">Para radicar sin cuenta: abrir el formulario interno →</a>':'<a href="#solicitud-interna">¿Es una solicitud interna? Envíala aquí sin crear cuenta →</a>'}</section>`;
   }
+  const glyphs={
+    ticket:'<path d="M4 7h16v4a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4V7Z"/><path d="M15 7v3m0 3v2m0 2v1"/>',
+    search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
+    lock:'<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
+    arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',
+    back:'<path d="M19 12H5m5-5-5 5 5 5"/>',
+    edit:'<path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5Z"/>',
+    refresh:'<path d="M20 8a8 8 0 0 0-13-3L4 8m0-5v5h5m-5 8a8 8 0 0 0 13 3l3-3m0 5v-5h-5"/>',
+    check:'<path d="m5 12 4 4L19 6"/>'
+  };
+  function icon(name){return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyphs[name]||glyphs.ticket}</svg>`;}
+  function publicHeader(){return `<header class="app-header public-header"><a class="brand" href="#inicio" aria-label="Portal PQR · Menú principal"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Ticketera interna</div></a><nav class="public-header-actions" aria-label="Navegación de la ticketera"><a href="#inicio">${icon('back')}Menú principal</a><a href="#gestion" class="team-access">${icon('lock')}Gestión del equipo</a></nav></header>`;}
+  function intakeChoices(){return `<div class="internal-flow-cards intake-choices" role="group" aria-label="Elige el tipo de solicitud">${[
+    ['PQR','ticket','PQR interna','Analistas revisa tu solicitud y coordina la solución.'],
+    ['RDG','refresh','Redigitación directa','Solicita una nueva auditoría al equipo de Redigitación.'],
+    ['EDC','edit','Edición de auditoría','Pide un ajuste en la auditoría existente, sin crear otra.']
+  ].map(([kind,glyph,title,description])=>`<button type="button" data-intake-kind="${kind}" aria-pressed="${kind==='PQR'}" aria-label="Seleccionar ${title}"><span class="choice-icon">${icon(glyph)}</span><span class="choice-content"><strong>${title}</strong><span>${description}</span></span><span class="choice-check">${icon('check')}</span></button>`).join('')}</div>`;}
   function publicTabs(active){return `<nav class="internal-public-tabs" aria-label="Hojas de la ticketera interna"><a href="#solicitud-interna" ${active==='send'?'aria-current="page"':''}>Enviar solicitud</a><a href="#consultar-ticket" ${active==='lookup'?'aria-current="page"':''}>Consultar mi ticket</a></nav>`;}
-  function publicIntro(){return `<nav class="public-breadcrumb" aria-label="Ruta de navegación"><a href="#inicio">Inicio</a><span> / PQR internas / Enviar solicitud</span></nav>${publicTabs('send')}<div class="public-placement-note"><strong>Estás en el formulario de envío, no en la bandeja de atención.</strong><p>Comercial y las áreas internas registran aquí su solicitud sin cuenta. El equipo la recibe en «PQR internas», dentro de Analistas o Redigitación según corresponda. En «Consultar mi ticket» puedes revisar su estado con el radicado.</p></div>`;}
+  function publicIntro(){return `<nav class="public-breadcrumb" aria-label="Ruta de navegación"><a href="#inicio">Inicio</a><span aria-hidden="true">/</span><span>Ticketera interna</span></nav>${publicTabs('send')}<aside class="public-placement-note">${icon('lock')}<div><strong>Envía tu solicitud sin crear una cuenta</strong><p>El equipo la atenderá en su bandeja interna. Después podrás seguir el estado con tu radicado.</p></div></aside>`;}
   function loginInfo(scope){return `<div class="login-module-context"><a href="#inicio">← Volver al menú principal</a><p><strong>${scope==='internal'?'Gestión de analistas · PQR internas':'Módulo de PQR de clientes'}</strong></p><p>Este acceso es para usuarios con cuenta. Ingresa con el usuario asignado por Administración.</p><a href="#solicitud-interna">Solo quiero enviar una solicitud interna, sin cuenta →</a></div>`;}
-  return{homeRoute,home,context,publicIntro,publicTabs,loginInfo};
+  return{homeRoute,home,context,publicIntro,publicTabs,loginInfo,icon,publicHeader,intakeChoices};
 })();
 
