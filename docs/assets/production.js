@@ -51,7 +51,7 @@
   let busy = false;
   let auditLookup = window.PQRAudits?.empty();
   let auditLookupOwner = null;
-  let workspace = location.hash === '#internas' ? 'internal' : 'external';
+  let workspace = ['#internas','#gestion'].includes(location.hash) ? 'internal' : 'external';
   const scopeTickets = () => window.PQRScopes.select(state.tickets,workspace);
 
   const managerTickets = () => [...scopeTickets(),...(workspace==='external'?state.historical:[])].map(t=>{
@@ -742,7 +742,7 @@
       if (type === 'close') return closeModal();
       if(type==='workspace'&&window.PQRScopes.eligible(state.me?.role)){
         workspace=button.dataset.scope==='internal'?'internal':'external';
-        history.replaceState(null,'',workspace==='internal'?'#internas':'#clientes');
+        history.replaceState(null,'',workspace==='internal'?'#gestion':'#clientes');
         for(const key of Object.keys(analystFilters))analystFilters[key]='all';
         for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
         auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
@@ -832,7 +832,7 @@
     } catch (error) { showError(error); }
   });
   if (!db) { $('#app').innerHTML = '<main class="login-shell"><section class="login-card"><h1>Portal PQR</h1><p>No se pudo cargar la conexión segura. Recarga la página.</p></section></main>'; return; }
-  window.addEventListener('hashchange',()=>{if(window.PQRNavigation.homeRoute(location.hash))renderHome();else if(location.hash==='#solicitud-interna')renderPublicInternal();else if(location.hash==='#consultar-ticket')renderPublicLookup();else{workspace=location.hash==='#internas'?'internal':'external';load().catch(showError);}});
+  window.addEventListener('hashchange',()=>{if(window.PQRNavigation.homeRoute(location.hash))renderHome();else if(location.hash==='#solicitud-interna')renderPublicInternal();else if(location.hash==='#consultar-ticket')renderPublicLookup();else{workspace=['#internas','#gestion'].includes(location.hash)?'internal':'external';load().catch(showError);}});
   load().catch(showError);
   setInterval(() => { document.querySelectorAll('[data-sla-due]').forEach(element => { const end = new Date(element.dataset.slaDue).getTime(); const minutes = Math.ceil(Math.abs(end - Date.now()) / 60000); element.classList.toggle('late', end < Date.now()); element.querySelector('strong').textContent = `${end < Date.now() ? 'Vencido hace' : 'Restan'} ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`; }); }, 60000);
 })();

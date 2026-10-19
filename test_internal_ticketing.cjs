@@ -11,7 +11,7 @@ test('portal oficial separa clientes, internos e históricos; formulario y consu
  const load=app.slice(app.indexOf('  async function load()'),app.indexOf('  async function readAll('));
  for(const route of ['#consultar-ticket','#solicitud-interna'])assert.ok(load.indexOf("location.hash==='"+route+"'")<load.indexOf('db.auth.getSession()'));
  assert.match(app,/\.\.\.scopeTickets\(\),\.\.\.\(workspace==='external'\?state.historical:\[\]\)/);
- for(const href of ['#clientes','#internas','#solicitud-interna','#consultar-ticket'])assert.ok(nav.home().includes('href="'+href+'"'));
+ for(const href of ['#clientes','#gestion','#solicitud-interna','#consultar-ticket'])assert.ok(nav.home().includes('href="'+href+'"'));
  assert.doesNotMatch(nav.home()+nav.loginInfo('internal'),/ficticios|simulad|franja amarilla|local/i);
  assert.match(nav.publicTabs('lookup'),/href="#consultar-ticket" aria-current="page"/);
 });
@@ -32,6 +32,19 @@ test('API pública aislada de la sesión y capacidades solo para los adjuntos de
  c.fixture={uploadPaths:['ticket/one-foto.png','ticket/two-foto.png']};c.files=[{name:'a.png'},{name:'b.png'},{name:'c.png'}];
  const failures=await vm.runInContext('uploadInternalAttachments(fixture,files,null)',c);
  assert.equal(uploads.length,2);assert.equal(uploads[0][0],'ticket/one-foto.png');assert.equal(uploads[1][0],'ticket/two-foto.png');assert.equal(uploads[0][2].upsert,false);assert.deepEqual(Array.from(failures),['c.png']);
+});
+test('menú inicial ofrece dos accesos: ticketera abierta y gestión con cuenta',()=>{
+ const nav=helpers().PQRNavigation,html=nav.home();
+ assert.equal((html.match(/<article class="entry-card /g)||[]).length,2);
+ assert.match(html,/<h2>Ticketera<\/h2>/);assert.match(html,/<h2>Gestión de analistas<\/h2>/);
+ assert.match(html,/href="#solicitud-interna">Ir a la ticketera/);
+ assert.match(html,/href="#gestion">Entrar a gestión de analistas/);
+ assert.equal(nav.homeRoute('#internas'),true);assert.equal(nav.homeRoute('#gestion'),false);
+ assert.match(app,/workspace=\['#internas','#gestion'\]\.includes\(location.hash\)/);
+ assert.match(html,/Sin usuario ni contraseña/);assert.match(html,/Requiere el usuario y la contraseña/);
+ assert.match(html,/href="#clientes"/);assert.match(html,/href="#consultar-ticket"/);
+ assert.doesNotMatch(html,/<form|type="password"/);
+ assert.match(nav.loginInfo('internal'),/Volver al menú principal/);
 });
 test('consulta usa solo seguimiento y envío usa UUID idempotente, sin simulador ni claves privadas',()=>{
  const lookup=app.slice(app.indexOf('  function renderPublicLookup()'),app.indexOf('  function renderPublicInternal()'));
