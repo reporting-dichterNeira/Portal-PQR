@@ -126,6 +126,20 @@ test('adjuntos solo para Comercial titular o creador manual con rol válido', ()
   assert.equal(vm.runInContext('canAddAttachments(ticket)', p.context), true);
 });
 
+test('PQR internas no permite radicación manual en Analistas, Gerencia ni invocación directa', async () => {
+  for (const role of ['validador','gerente']) {
+    const p = portal(role);
+    p.context.workspace = 'internal';
+    p.context.$ = selector => selector === '#view > .topline .sub' ? {} : selector === '#view' ? p.view : selector === '.export-actions' ? p.exports : selector === '#view h1' || selector === '#view .manager-title .sub' ? {} : null;
+    vm.runInContext('analyst(); dashboard(); newTicket("PQR",true)',p.context);
+    assert.doesNotMatch(p.view.innerHTML,/new-manual-pqr/);
+    assert.equal(p.exports.html,undefined);
+    assert.equal(p.dialogs.length,0);
+    await assert.rejects(vm.runInContext('createManualPqr({scope:"internal"})',p.context),/solo está disponible en PQR de clientes/);
+    assert.equal(p.calls.length,0);
+  }
+});
+
 test('el campo libre no interpola nombres de cuentas registradas', () => {
   const p = portal('validador', [{ id: 'c', name: '<script>', username: 'c"', role: 'comercial', active: true }]);
   vm.runInContext('newTicket("PQR", true)', p.context);

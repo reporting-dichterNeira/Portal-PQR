@@ -40,7 +40,7 @@
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
   const manualPqrRoles = ['validador', 'gerente'];
-  const canCreateManualPqr = () => manualPqrRoles.includes(state.me?.role);
+  const canCreateManualPqr = () => workspace === 'external' && manualPqrRoles.includes(state.me?.role);
   const canEditManualPqr = ticket => ticket?.manualEntry === true && requestType(ticket) === 'PQR' && !ticket.deletedAt &&
     (state.me?.role === 'validador' || (state.me?.role === 'gerente' && ticket.createdBy === state.me.id));
   const canAddAttachments = ticket => !ticket.deletedAt && (
@@ -229,7 +229,8 @@
     return data;
   }
   async function createManualPqr(payload) {
-    const { data, error } = await db.rpc(payload.scope === 'internal' ? 'pqr_create_manual_scoped' : 'pqr_create_manual', { p_data: payload });
+    if (!canCreateManualPqr() || payload.scope === 'internal') throw new Error('La radicación manual solo está disponible en PQR de clientes.');
+    const { data, error } = await db.rpc('pqr_create_manual', { p_data: { ...payload, scope: 'external' } });
     if (error) throw error;
     return data;
   }
@@ -361,7 +362,7 @@
   function analyst() {
     const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
     const cases = PQRReports.filterTickets(all, analystFilters);
-    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', canCreateManualPqr() ? '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>' : '')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
     $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
     $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
     if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
@@ -376,7 +377,7 @@
     $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup, currentUserId: state.me.id });
     $('#view h1').textContent=`Dashboard · ${window.PQRScopes.label(workspace)}`;
     $('#view .manager-title .sub').textContent=workspace==='internal'?'Indicadores exclusivos de solicitudes internas, sin mezclar casos de clientes.':'Indicadores de clientes e históricos. No incluye solicitudes internas.';
-    $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
+    if (canCreateManualPqr()) $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
     for(const key of ['type','country','study','month','origin','status','analyst'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
   }
   function completeData(ticket) {

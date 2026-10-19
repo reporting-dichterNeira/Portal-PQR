@@ -51,7 +51,8 @@ test('consulta usa solo seguimiento y envío usa UUID idempotente, sin simulador
  assert.match(lookup,/internalAPI.lookup\(code\)/);assert.doesNotMatch(lookup,/t\.(?:requesterName|requesterEmail|description|timeline|uploadPaths|response)/);
  assert.match(lookup,/No encontramos un ticket interno/);assert.match(lookup,/role="status" aria-live="polite"/);
  assert.match(app,/requestId=crypto.randomUUID\(\)/);assert.match(app,/internalAPI.submit\(requestId,payload\)/);
- assert.match(app,/payload.files=files.map/);assert.match(app,/payload.scope === 'internal' \? 'pqr_create_manual_scoped' : 'pqr_create_manual'/);
+ assert.match(app,/payload.files=files.map/);assert.ok(app.includes("db.rpc('pqr_create_manual',"));
+ assert.ok(!app.includes("db.rpc('pqr_create_manual_scoped'"));
  assert.doesNotMatch(app,/PQRLocal|local-adapter|INT-LOCAL|service_role|SUPABASE_SERVICE_ROLE_KEY/);
  const html=fs.readFileSync('docs/index.html','utf8');for(const name of ['scopes','navigation'])assert.match(html,new RegExp('assets/'+name+'\\.js'));
 });

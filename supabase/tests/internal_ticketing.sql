@@ -99,8 +99,11 @@ begin
  result:=public.pqr_submit_internal(gen_random_uuid(),payload||'{"files":[{"name":"file.exe","size":10}]}');assert result ? 'error';
  execute 'reset role';
  perform set_config('request.jwt.claim.sub',manager::text,true);execute 'set local role authenticated';
- t:=public.pqr_create_manual_scoped('{"scope":"internal","client":"Lindley","country":"Perú","externalTicketId":"QA-rollback"}');
- assert t->>'scope'='internal' and t->>'code' like 'PQR-INT-%' and t->>'createdBy'=manager::text;
+ rejected:=false;
+ begin
+  perform public.pqr_create_manual_scoped('{"scope":"internal","client":"Lindley","country":"Perú","externalTicketId":"QA-rollback"}');
+ exception when raise_exception then rejected:=sqlerrm like '%solo está disponible en PQR de clientes%'; end;
+ assert rejected,'La radicación manual interna debe rechazarse';
  execute 'reset role';
  assert (select count(*) from public.pqr_tickets where data->>'scope' is distinct from 'internal')=initial_count;
  assert (select md5(string_agg(data::text,'|' order by id)) from public.pqr_tickets where data->>'scope' is distinct from 'internal')=original_digest;
