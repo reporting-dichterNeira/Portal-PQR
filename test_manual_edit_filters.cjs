@@ -7,10 +7,10 @@ function harness(role='validador'){
  const dialogs=[],calls=[],metrics=[],tables=[];
  const form={elements:{client:{},clientOther:{}}},view={innerHTML:'',filters:'',querySelector(){return{insertAdjacentHTML:(_,html)=>view.filters=html}}};
  const state={me:{id:'creator',role},tickets:[fixture,{...fixture,id:'other',client:'Lindley',country:'Perú',createdAt:'2026-09-01',status:'Cerrado',validatorPersonId:'v1'}],staff:{validators:[{id:'v1',name:'Ana'}],redigitators:[]}};
- const c=vm.createContext({window:{},state,esc,clients:['KO moderno','KO tradicional','Lindley','Otros'],countries:['Chile','Perú'],
+ const c=vm.createContext({window:{PQRScopes:{label:()=> 'PQR de clientes'}},workspace:'external',scopeTickets:()=>state.tickets,state,esc,clients:['KO moderno','KO tradicional','Lindley','Otros'],countries:['Chile','Perú'],
   analystFilters:{country:'all',study:'all',month:'all',origin:'all',type:'all',status:'all',analyst:'all'},
   requestType:t=>t.requestType||'PQR',staffName:(_,id)=>id==='v1'?'Ana':'',
-  $:sel=>sel==='#edit-manual-form'?form:sel==='#view'?view:null,
+  $:sel=>sel==='#edit-manual-form'?form:sel==='#view'?view:sel==='#view h1'?{}:null,
   modal:(title,html)=>dialogs.push({title,html}),header:()=>'',metric:(label,n)=>{metrics.push([label,n]);return''},ticketTable:cases=>{tables.push(cases);return''},
   formData:()=>({externalTicketId:' REF-2 ',pdv:' 00123 ',description:' descripción corregida ',client:'KO tradicional',country:'Perú',reason:' Estudio mal digitado ',status:'Cerrado'}),
   submit:async(_,fn)=>fn(),db:{rpc:async(name,args)=>{calls.push({name,args});return {error:null}}}});

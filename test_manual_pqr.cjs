@@ -17,9 +17,10 @@ function portal(role = 'validador', users) {
   ], tickets: [], staff: {} };
   const context = vm.createContext({
     state, managerState: {}, analystFilters: {}, auditLookup: undefined, managerTickets:()=>[],
+    workspace:'external',scopeTickets:()=>state.tickets,location:{hash:'#clientes'},window:{PQRNavigation:{homeRoute:()=>false},PQRScopes:{label:()=> 'PQR de clientes'}},
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
     clients: ['KO tradicional', 'Otros'], countries: ['Colombia'],
-    $: selector => selector === '#case-form' ? form : selector === '#view' ? view : selector === '.export-actions' ? exports : null,
+    $: selector => selector === '#case-form' ? form : selector === '#view' ? view : selector === '.export-actions' ? exports : ['#view h1','#view .manager-title .sub'].includes(selector) ? {} : null,
     PQRReports: { render: () => '<div class="export-actions"></div>', filterTickets: tickets=>tickets, listFilters:()=>'' },
     document: {}, options: values => values.map(v => `<option>${v}</option>`).join(''),
     modal: (title, html) => dialogs.push({ title, html }),

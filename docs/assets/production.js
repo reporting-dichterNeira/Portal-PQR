@@ -4,6 +4,24 @@
   const URL = 'https://niwkegxwwwoahcbsoujy.supabase.co';
   const KEY = 'sb_publishable_YCNKUILCQOjMHOue4pkjRw_hf8TJJTT';
   const db = window.supabase?.createClient(URL, KEY, { auth: { detectSessionInUrl: false } });
+  // Public intake uses an isolated anonymous client, never the team's session.
+  const publicDb = window.supabase?.createClient(URL, KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'pqr-public-intake-ephemeral' } });
+  const publicResult = result => { if (result.data?.error) return { data: null, error: new Error(result.data.error) }; return result; };
+  const internalAPI = {
+    lookup: async code => publicResult(await publicDb.rpc('pqr_lookup_internal', { p_code: code })),
+    submit: async (requestId, payload) => publicResult(await publicDb.rpc('pqr_submit_internal', { p_request_id: requestId, p_data: payload }))
+  };
+  async function uploadInternalAttachments(ticket, files, status) {
+    const failed = [];
+    for (let i = 0; i < files.length; i++) {
+      if (status) status.textContent = 'Cargando adjunto '+(i+1)+' de '+files.length;
+      const path = ticket.uploadPaths?.[i];
+      if (!path) { failed.push(files[i].name); continue; }
+      const { error } = await publicDb.storage.from(attachmentBucket).upload(path, files[i], { contentType: attachmentTypes[files[i].name.split('.').pop().toLowerCase()], upsert: false });
+      if (error) failed.push(files[i].name);
+    }
+    return failed;
+  }
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const usernameKey = value => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -33,8 +51,10 @@
   let busy = false;
   let auditLookup = window.PQRAudits?.empty();
   let auditLookupOwner = null;
+  let workspace = location.hash === '#internas' ? 'internal' : 'external';
+  const scopeTickets = () => window.PQRScopes.select(state.tickets,workspace);
 
-  const managerTickets = () => [...state.tickets,...state.historical].map(t=>{
+  const managerTickets = () => [...scopeTickets(),...(workspace==='external'?state.historical:[])].map(t=>{
     const result=window.PQRHistory.resolve(t,auditLookup,state.overrides.find(o=>o.case_id===t.id));
     result.analystName=result.analystName||staffName('validador',result.validatorPersonId);
     return result;
@@ -209,7 +229,7 @@
     return data;
   }
   async function createManualPqr(payload) {
-    const { data, error } = await db.rpc('pqr_create_manual', { p_data: payload });
+    const { data, error } = await db.rpc(payload.scope === 'internal' ? 'pqr_create_manual_scoped' : 'pqr_create_manual', { p_data: payload });
     if (error) throw error;
     return data;
   }
@@ -225,7 +245,12 @@
     return data;
   }
   async function load() {
+    if(window.PQRNavigation.homeRoute(location.hash))return renderHome();
+    if(location.hash==='#solicitud-interna')return renderPublicInternal();
+    if(location.hash==='#consultar-ticket')return renderPublicLookup();
+    const loadRoute=location.hash;
     const { data: session } = await db.auth.getSession();
+    if(location.hash!==loadRoute)return;
     if (!session.session) { state.me = null; renderLogin(); return; }
     const queries = await Promise.all([
       db.from('pqr_profiles').select('id,username,name,role,active').order('name'),
@@ -242,6 +267,7 @@
     const reporting = ['gerente','admin'].includes(me.role);
     const historical = reporting ? await readAll('pqr_historical_cases','id,data') : [];
     const overrides = reporting ? await readAll('pqr_case_overrides','case_id,source,patch,reason,updated_at,updated_by,history','case_id') : [];
+    if(location.hash!==loadRoute)return;
     state = {
       me, users: profiles, contactEmails,
       staff: { validators: staff.filter(person => person.role === 'validador'), redigitators: staff.filter(person => person.role === 'redigitador') },
@@ -254,7 +280,7 @@
     if (auditLookupOwner !== me.id) { auditLookup = window.PQRAudits?.empty(); auditLookupOwner = me.id; }
     renderApp();
     // This reads Supabase only; opening Gerencia never wakes Reporting Cluster.
-    if (me.role === 'gerente' && auditLookup && !auditLookup.loaded) await refreshAudits();
+    if (me.role === 'gerente' && !window.PQRNavigation.homeRoute(location.hash) && auditLookup && !auditLookup.loaded) await refreshAudits();
   }
   async function readAll(table,columns,key='id') {
     const rows=[];
@@ -266,9 +292,11 @@
     }
   }
   function renderLogin(message = '') {
+    document.title='Acceso del equipo · Portal PQR';
     auditLookup = window.PQRAudits?.empty(); auditLookupOwner = null;
     for (const key of Object.keys(analystFilters)) analystFilters[key] = 'all';
     $('#app').innerHTML = $('#login-template').innerHTML;
+    $('.login-card').insertAdjacentHTML('afterbegin',window.PQRNavigation.loginInfo(workspace));
     if (message) $('#login-message').textContent = message;
     $('#login-form').onsubmit = async event => {
       event.preventDefault();
@@ -284,10 +312,21 @@
   function renderApp() {
     const me = state.me;
     $('#app').innerHTML = `<header class="app-header"><div class="brand"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Portal PQR</div></div><nav class="nav" aria-label="Bandeja"><span class="active">${esc(roles[me.role])}</span></nav><div class="user"><span><strong>${esc(me.name)}</strong><br><small>@${esc(me.username)}</small></span><button class="ghost" data-action="notifications">Notificaciones${state.notifications.filter(item => !item.read).length ? ` (${state.notifications.filter(item => !item.read).length})` : ''}</button><button class="ghost" data-action="password">Contraseña</button><button class="ghost" data-action="logout">Salir</button></div></header><main class="layout" id="view"></main>`;
+    if(window.PQRScopes.eligible(me.role))$('#view').insertAdjacentHTML('beforebegin',`<nav class="scope-tabs layout" aria-label="Separar solicitudes"><a href="#inicio" class="scope-home">← Inicio</a><button data-action="workspace" data-scope="external">PQR de clientes</button><button data-action="workspace" data-scope="internal">PQR internas</button><a href="#solicitud-interna">Enviar solicitud interna · sin cuenta ↗</a></nav>`);
+    $('#view').insertAdjacentHTML('beforebegin','<div class="layout" id="module-context"></div>');
     renderView();
   }
   function renderView() {
     const role = state.me.role;
+    document.title=`${window.PQRScopes.label(workspace)} · ${roles[role]}`;
+    if(workspace==='internal'&&!window.PQRScopes.eligible(role)){
+      $('#module-context').innerHTML=window.PQRNavigation.context('internal','comercial');
+      $('#view').innerHTML='<section class="card"><h1>Este es el seguimiento del equipo</h1><p>Con una cuenta Comercial puedes gestionar tus PQR de clientes. Para enviar una solicitud interna no necesitas una cuenta ni entrar a esta bandeja.</p><div class="actions"><a class="primary module-link" href="#solicitud-interna">Enviar solicitud interna</a><a class="ghost module-link" href="#clientes">Ir a mis PQR de clientes</a><a href="#inicio">Volver al inicio</a></div></section>';return;
+    }
+    if(!window.PQRScopes.eligible(role))workspace='external';
+    $('#module-context').innerHTML=window.PQRNavigation.context(workspace,role);
+    $('#view').dataset.workspace=workspace;
+    document.querySelectorAll('[data-action="workspace"]').forEach(b=>{const active=b.dataset.scope===workspace;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
     if (role === 'comercial') return commercial();
     if (role === 'validador') return analyst();
     if (role === 'redigitador') return redigitator();
@@ -299,7 +338,7 @@
     const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
     const filter = role === 'validador' ? '' : `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
-    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
+    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
@@ -316,22 +355,27 @@
     return '';
   }
   function commercial() {
-    const cases = state.tickets.filter(ticket => ticket.commercial === state.me.id);
+    const cases = scopeTickets().filter(ticket => ticket.commercial === state.me.id);
     $('#view').innerHTML = `${header('Mis solicitudes', 'Radica PQR, redigitaciones o ediciones de auditoría.', '<button class="secondary" data-action="new-edit">Solicitar edición</button><button class="secondary" data-action="new-direct">Solicitar redigitación directa</button><button class="primary" data-action="new-ticket">Nueva PQR</button>')}<section class="metrics">${metric('Radicadas', cases.length)}${metric('En gestión', cases.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'comercial')}`;
   }
   function analyst() {
-    const all = state.tickets.filter(ticket => requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
+    const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
     const cases = PQRReports.filterTickets(all, analystFilters);
     $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
     $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
+    $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
+    if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
     for (const key of Object.keys(analystFilters)) $('#analyst-'+key+'-filter')?.addEventListener('change', event => { analystFilters[key] = event.target.value; analyst(); });
   }
   function redigitator() {
-    const cases = state.tickets.filter(ticket => ticket.redigitador === state.me.id);
+    const cases = scopeTickets().filter(ticket => ticket.redigitador === state.me.id);
     $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
   }
   function dashboard() {
+    if(window.PQRNavigation.homeRoute(location.hash)||['#solicitud-interna','#consultar-ticket'].includes(location.hash))return;
     $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup, currentUserId: state.me.id });
+    $('#view h1').textContent=`Dashboard · ${window.PQRScopes.label(workspace)}`;
+    $('#view .manager-title .sub').textContent=workspace==='internal'?'Indicadores exclusivos de solicitudes internas, sin mezclar casos de clientes.':'Indicadores de clientes e históricos. No incluye solicitudes internas.';
     $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
     for(const key of ['type','country','study','month','origin','status','analyst'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
   }
@@ -383,11 +427,11 @@
     return value;
   }
   function admin() {
-    const deleted = listTypes.admin === 'all' ? state.deleted : state.deleted.filter(ticket => requestType(ticket) === listTypes.admin);
+    const deleted = listTypes.admin === 'all' ? window.PQRScopes.select(state.deleted,workspace) : window.PQRScopes.select(state.deleted,workspace).filter(ticket => requestType(ticket) === listTypes.admin);
     $('#view').innerHTML = `${header('Administración', 'Gestiona cuentas, responsables, tipologías y registros.', '<button class="secondary" data-action="new-user">Nuevo usuario</button>')}
-      <section class="metrics">${metric('Solicitudes radicadas', state.tickets.length)}${metric('Abiertas', state.tickets.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', state.tickets.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section>
+      <section class="metrics">${metric('Solicitudes radicadas', scopeTickets().length)}${metric('Abiertas', scopeTickets().filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', scopeTickets().filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Analistas activos', state.staff.validators.filter(person => person.active).length)}${metric('Redigitadores activos', state.staff.redigitators.filter(person => person.active).length)}</section>
       <section class="grid2 staff-grid">${staffCard('validador', 'Analistas de PQR')}${staffCard('redigitador', 'Redigitadores')}</section>
-      ${ticketTable(state.tickets, 'admin')}
+      ${ticketTable(scopeTickets(), 'admin')}
       ${deleted.length ? `<section class="card"><h3>Registros eliminados</h3><div class="list">${deleted.map(ticket => `<div class="list-item staff-item"><div><strong>${esc(ticket.code)}</strong><small>${esc(ticket.client)} · ${ticket.pdv ? `PDV ${esc(ticket.pdv)} · ` : ''}${fmt(ticket.deletedAt)}</small></div><button class="secondary" data-action="restore" data-id="${ticket.id}">Restaurar</button></div>`).join('')}</div></section>` : ''}
       <section class="card accounts-card"><h3>Cuentas de acceso</h3><p class="sub">Ingreso solo con usuario y contraseña. Los correos de aviso son independientes y puedes asociar varios a cada cuenta compartida.</p><div class="table-wrap"><table class="table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.users.map(person => `<tr><td>${esc(person.name)}</td><td>@${esc(person.username)}</td><td>${esc(roles[person.role])}</td><td>${person.active ? 'Activo' : 'Inactivo'}</td><td><button class="ghost" data-action="edit-user" data-id="${person.id}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>
       <section class="card tipologies-card"><div class="staff-heading"><div><h3>Tipologías</h3><p class="sub">Define el área sugerida para cada tipología. El analista podrá cambiarla en el dictamen.</p></div><span class="badge">${state.tips.length} registradas</span></div><div class="tipologies-grid">${state.tips.map(tip => `<div class="tipology-item"><strong>${esc(tip)}</strong><small>Área sugerida: ${esc(state.tipAreas[tip] || 'Sin sugerencia')}</small><div class="actions"><button class="secondary" data-action="edit-tip-area" data-tip="${esc(tip)}">Cambiar área</button><button class="ghost" data-action="delete-tip" data-tip="${esc(tip)}">Eliminar</button></div></div>`).join('')}</div><form id="tip-form" class="tip-add-form"><label>Nueva tipología<input name="name" placeholder="Nombre de la tipología" required maxlength="150"></label>${tipAreaFields('new-tip')}<button class="primary">Agregar tipología</button></form></section>`;
@@ -408,6 +452,56 @@
       if (area) { const result = await db.rpc('pqr_admin_tip_area', { p_name: name, p_area: area }); if (result.error) throw result.error; }
     }); };
   }
+  function renderHome() { document.title='Inicio · Portal PQR';$('#modal')?.remove();$('#app').innerHTML=window.PQRNavigation.home(); }
+  function renderPublicLookup() {
+    document.title='Consultar mi ticket · Portal PQR';$('#modal')?.remove();
+    $('#app').innerHTML=`<header class="app-header"><div class="brand"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Ticketera interna</div></div><a href="#inicio">← Inicio</a></header><main class="public-internal ticket-lookup"><nav class="public-breadcrumb" aria-label="Ruta de navegación"><a href="#inicio">Inicio</a><span> / PQR internas / Consultar mi ticket</span></nav>${window.PQRNavigation.publicTabs('lookup')}<section class="card"><span class="eyebrow">SEGUIMIENTO DE SOLICITUDES INTERNAS</span><h1>Consultar mi ticket</h1><p>Escribe el número completo que recibiste al enviar tu solicitud. Puedes consultar PQR, redigitaciones y ediciones internas sin ingresar a la bandeja del equipo.</p><form id="ticket-lookup-form"><label for="lookup-code">Número de ticket / radicado</label><div class="lookup-controls"><input id="lookup-code" name="code" required maxlength="100" autocomplete="off" spellcheck="false" placeholder="Pega el radicado interno completo" aria-describedby="lookup-hint"><button class="primary" type="submit">Consultar estado</button></div><small id="lookup-hint">Copia el radicado completo, incluyendo sus letras y guiones.</small></form><div id="lookup-result" role="status" aria-live="polite" aria-atomic="true"></div></section><p class="portal-note">Se muestran únicamente el estado y las fechas de seguimiento, sin nombres, comentarios internos ni adjuntos.</p></main>`;
+    const form=$('#ticket-lookup-form'),output=$('#lookup-result');let searching=false;
+    form.elements.code.oninput=()=>{output.replaceChildren();};
+    form.onsubmit=async event=>{
+      event.preventDefault();if(searching)return;
+      const code=form.elements.code.value.trim();if(!code){form.reportValidity();return;}
+      searching=true;lock(form,true);output.textContent='Consultando…';
+      try{
+        const result=await internalAPI.lookup(code);if(result.error)throw result.error;
+        if(!form.isConnected)return;
+        if(!result.data){output.innerHTML='<div class="lookup-message"><strong>No encontramos un ticket interno con ese número.</strong><p>Revisa el radicado completo y vuelve a consultar. El envío debe haberse realizado desde esta ticketera interna.</p></div>';return;}
+        const t=result.data,status=t.status==='En Validación'?'En revisión':t.status;
+        output.innerHTML=`<article class="lookup-status-card"><span class="eyebrow">TICKET INTERNO</span><h2>${esc(t.code)}</h2><p class="lookup-status">${esc(status)}</p><dl><div><dt>Tipo de solicitud</dt><dd>${esc(requestLabels[t.requestType]||'Solicitud interna')}</dd></div><div><dt>Registrado</dt><dd>${esc(fmt(t.createdAt))}</dd></div><div><dt>Última actualización</dt><dd>${esc(fmt(t.updatedAt))}</dd></div>${t.closedAt?`<div><dt>Fecha de cierre</dt><dd>${esc(fmt(t.closedAt))}</dd></div>`:''}</dl><p class="sub">Para revisar si hay novedades, pulsa «Consultar estado» otra vez.</p></article>`;
+      }catch(error){if(form.isConnected)output.textContent='No pudimos consultar el estado. Espera un minuto y vuelve a intentar.';}
+      finally{searching=false;lock(form,false);}
+    };
+  }
+  function renderPublicInternal() {
+    document.title='Enviar solicitud interna · Portal PQR';
+    $('#app').innerHTML=`<header class="app-header"><div class="brand"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Ticketera interna</div></div><a href="#internas">Seguimiento del equipo · requiere cuenta</a></header><main class="public-internal"><div class="topline"><div><span class="eyebrow">SOLICITUDES INTERNAS · SIN CREAR CUENTA</span><h1>¿Qué necesitas solicitar?</h1><p class="sub">Escribe tu usuario o nombre y registra una PQR, redigitación o edición. No se necesita contraseña para enviar.</p></div></div><div class="internal-flow-cards"><article><strong>PQR</strong><p>Analistas revisa y dictamina. Si requiere redigitación, continúa el flujo de verificación.</p></article><article><strong>Redigitación directa</strong><p>Llega a Redigitación y se cierra cuando el equipo registra la nueva auditoría.</p></article><article><strong>Edición</strong><p>Solo Validación, dentro de Redigitación. Confirma si editó y responde, sin nueva auditoría.</p></article></div><section class="card"><h2>Enviar solicitud interna</h2><p class="sub">No compartas contraseñas. Tu nombre identifica la solicitud, pero no autentica tu identidad ni abre la bandeja de otras personas.</p><form id="public-internal-form" class="form-grid"><label>Usuario o nombre del solicitante<input name="requesterName" required minlength="3" maxlength="150" placeholder="Ej. nombre.apellido"></label><label>Correo de contacto (opcional)<input name="requesterEmail" type="email" maxlength="254" placeholder="correo@empresa.com"><small>Dato de contacto para el equipo; no crea una cuenta ni confirma tu identidad.</small></label><label>Tipo de solicitud<select name="kind" required><option value="PQR">PQR interna</option><option value="RDG">Redigitación directa</option><option value="EDC">Edición de auditoría</option></select></label><label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="public-other-client">Otro estudio<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label><label id="public-pdv-label">ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric maxlength="80" required></label><label class="full" id="public-audit-label">ID de auditoría (opcional para PQR)<input name="auditOriginal" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric maxlength="80"></label><label class="full">Descripción / motivo<textarea name="description" required minlength="8" maxlength="12000"></textarea></label>${attachmentField()}<p id="public-intake-error" class="full sub" role="alert"></p><p id="upload-progress" class="full sub" role="status"></p><div class="actions full"><button class="primary" type="submit">Enviar solicitud interna</button></div></form></section></main>`;
+    document.querySelector('main.public-internal').insertAdjacentHTML('afterbegin',window.PQRNavigation.publicIntro());
+    $('.app-header').insertAdjacentHTML('beforeend','<a href="#inicio">← Inicio</a>');
+    const form=$('#public-internal-form'), requestId=crypto.randomUUID();bindAttachmentSelection(form);
+    form.querySelectorAll('[data-numeric]').forEach(input=>input.addEventListener('input',()=>{input.value=input.value.replace(/\D/g,'');}));
+    form.elements.kind.onchange=()=>{
+      const kind=form.elements.kind.value;form.elements.auditOriginal.required=kind!=='PQR';form.elements.pdv.required=kind!=='EDC';
+      $('#public-audit-label').firstChild.textContent=kind==='PQR'?'ID de auditoría (opcional para PQR)':'ID de auditoría actual';
+      $('#public-pdv-label').firstChild.textContent=kind==='EDC'?'ID de PDV (opcional)':'ID de PDV';
+    };
+    form.elements.client.onchange=()=>{const other=form.elements.client.value==='Otros';$('#public-other-client').classList.toggle('hide',!other);form.elements.clientOther.required=other;};
+    form.onsubmit=async event=>{
+      event.preventDefault();if(busy)return;busy=true;lock(form,true);$('#public-intake-error').textContent='';
+      let created;
+      try{
+        const files=checkedAttachments(form.elements.attachments),values=formData(form);
+        const payload=Object.fromEntries(['requesterName','requesterEmail','kind','country','pdv','auditOriginal','description'].map(key=>[key,String(values[key]||'').trim()]));
+        payload.client=(values.client==='Otros'?values.clientOther:values.client||'').trim();
+        payload.files=files.map(file=>({name:file.name,size:file.size}));
+        const result=await internalAPI.submit(requestId,payload);if(result.error)throw result.error;created=result.data;
+        const failed=await uploadInternalAttachments(created,files,$('#upload-progress'));
+        const main=document.querySelector('main.public-internal');
+        main.innerHTML=`<section class="card internal-receipt" role="status"><span class="eyebrow">SOLICITUD INTERNA REGISTRADA</span><h1>${esc(created.code)}</h1><p>Conserva este radicado para consultar con el equipo. Tu solicitud aparecerá únicamente en la bandeja interna, no en PQR de clientes.</p><p><strong>Tipo:</strong> ${esc(requestLabels[created.requestType])} · <strong>Solicitante:</strong> ${esc(payload.requesterName)}</p>${failed.length?`<p role="alert">La solicitud se creó, pero no se cargaron: ${failed.map(esc).join(', ')}. Entrega los archivos al equipo indicando este radicado; no dupliques la solicitud.</p>`:files.length?'<p>Los adjuntos seleccionados se guardaron de forma privada.</p>':'<p>No se añadieron adjuntos.</p>'}<p class="sub">Guarda tu radicado completo para consultar el estado en «Consultar mi ticket».</p><div class="actions"><button class="primary" id="another-internal">Enviar otra solicitud</button><a class="ghost module-link" href="#consultar-ticket">Consultar mi ticket</a><a href="#internas">Volver al seguimiento del equipo</a></div></section>`;
+        $('#another-internal').onclick=renderPublicInternal;
+      }catch(error){const message=created?`Se registró ${created.code}, pero falló la carga de adjuntos. No vuelvas a enviar el formulario: entrega el soporte al equipo con ese radicado.`:error.message;$('#public-intake-error').textContent=message;if(created){form.onsubmit=event=>event.preventDefault();}}
+      finally{busy=false;if(!created)lock(form,false);}
+    };
+  }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
   function newTicket(kind, manual = false) {
     if (manual ? !canCreateManualPqr() || kind !== 'PQR' : state.me.role !== 'comercial') return;
@@ -427,6 +521,7 @@
       await submit(form, async () => {
         const payload = formData(form);
         if (manual) payload.source = 'Otro';
+        payload.scope = workspace;
         delete payload.attachments;
         delete payload.clientOther;
         payload.client = form.elements.client.value === 'Otros' ? form.elements.clientOther.value.trim() : form.elements.client.value;
@@ -457,6 +552,7 @@
     const canAdd = canAddAttachments(ticket);
     modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')}${requestType(ticket) === 'EDC' ? '' : ` · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}`}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes && requestType(ticket) !== 'EDC' ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}${requestType(ticket) === 'EDC' && ticket.editCompleted !== undefined ? `<p><strong>¿Se editó?</strong> ${ticket.editCompleted ? 'Sí' : 'No'}<br><strong>Comentario:</strong> ${esc(ticket.editComment || '—')}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
     loadAttachments(ticket.id);
+    $('.case-result')?.insertAdjacentHTML('afterbegin',`<p><strong>Ámbito:</strong> ${esc(window.PQRScopes.label(window.PQRScopes.of(ticket)))}${ticket.requesterName?`<br><strong>Solicitante:</strong> ${esc(ticket.requesterName)} <small>(usuario/nombre declarado)</small>`:''}${ticket.requesterEmail?`<br><strong>Contacto:</strong> ${esc(ticket.requesterEmail)}`:''}</p>`);
     if (canEditManualPqr(ticket)) $('.case-result')?.insertAdjacentHTML('beforeend', `<button class="secondary" data-action="edit-manual-pqr" data-id="${esc(ticket.id)}">Editar radicación</button>`);
     if (ticket.manualEntry) $('.case-result')?.insertAdjacentHTML('beforeend', `<p><strong>Radicación manual</strong> · <strong>Registrada por:</strong> ${esc(ticket.createdByName || accountName(ticket.createdBy))}<br><strong>ID de ticket de origen:</strong> ${esc(ticket.externalTicketId || 'No indicado')}${ticket.commercialName||ticket.commercial?`<br><strong>Comercial asociado (registro anterior):</strong> ${esc(ticket.commercialName || accountName(ticket.commercial))}`:''}</p>${!ticket.pdv||!ticket.description?'<p class="sub">Información pendiente: el ID de PDV y la descripción deben completarse al dictaminar.</p>':''}`);
     if (canAdd) {
@@ -644,6 +740,13 @@
     const reportTicket = state.me?.role==='gerente'?managerTickets().find(item=>item.id===button.dataset.id):null;
     try {
       if (type === 'close') return closeModal();
+      if(type==='workspace'&&window.PQRScopes.eligible(state.me?.role)){
+        workspace=button.dataset.scope==='internal'?'internal':'external';
+        history.replaceState(null,'',workspace==='internal'?'#internas':'#clientes');
+        for(const key of Object.keys(analystFilters))analystFilters[key]='all';
+        for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
+        auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
+      }
       if (type === 'logout') { await db.auth.signOut(); state.me = null; return renderLogin(); }
       if (type === 'password') return passwordForm();
       if (type === 'notifications') {
@@ -729,6 +832,7 @@
     } catch (error) { showError(error); }
   });
   if (!db) { $('#app').innerHTML = '<main class="login-shell"><section class="login-card"><h1>Portal PQR</h1><p>No se pudo cargar la conexión segura. Recarga la página.</p></section></main>'; return; }
+  window.addEventListener('hashchange',()=>{if(window.PQRNavigation.homeRoute(location.hash))renderHome();else if(location.hash==='#solicitud-interna')renderPublicInternal();else if(location.hash==='#consultar-ticket')renderPublicLookup();else{workspace=location.hash==='#internas'?'internal':'external';load().catch(showError);}});
   load().catch(showError);
   setInterval(() => { document.querySelectorAll('[data-sla-due]').forEach(element => { const end = new Date(element.dataset.slaDue).getTime(); const minutes = Math.ceil(Math.abs(end - Date.now()) / 60000); element.classList.toggle('late', end < Date.now()); element.querySelector('strong').textContent = `${end < Date.now() ? 'Vencido hace' : 'Restan'} ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`; }); }, 60000);
 })();
