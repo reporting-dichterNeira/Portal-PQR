@@ -41,6 +41,7 @@
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
   const manualPqrRoles = ['validador', 'gerente'];
   const canCreateManualPqr = () => workspace === 'external' && manualPqrRoles.includes(state.me?.role);
+  const manualPqrButtons = () => canCreateManualPqr() ? '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button><button class="secondary" data-action="new-batch-pqr">Añadir varias PQR</button>' : '';
   const canEditManualPqr = ticket => ticket?.manualEntry === true && requestType(ticket) === 'PQR' && !ticket.deletedAt &&
     (state.me?.role === 'validador' || (state.me?.role === 'gerente' && ticket.createdBy === state.me.id));
   const canAddAttachments = ticket => !ticket.deletedAt && (
@@ -137,11 +138,10 @@
   function accountName(id) { return state.users.find(person => person.id === id)?.name || ''; }
   function due(ticket, role) {
     if (['Cerrado', 'No Aplica'].includes(ticket.status)) return '—';
-    const start = role === 'redigitador' ? (ticket.redigitRequestedAt || ticket.createdAt) : ticket.status === 'Pendiente de Verificación' ? ticket.redigitAt : (ticket.reopenedAt || ticket.assignedAt || ticket.createdAt);
-    const end = new Date(start).getTime() + 86400000;
+    const end = window.PQRSLA.addHours(window.PQRSLA.start(ticket,role),48);
     if (!Number.isFinite(end)) return '—';
-    const minutes = Math.ceil(Math.abs(end - Date.now()) / 60000);
-    return `<div class="sla-clock ${end < Date.now() ? 'late' : ''}" data-sla-due="${new Date(end).toISOString()}"><strong>${end < Date.now() ? 'Vencido hace' : 'Restan'} ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min</strong><small>Hasta ${fmt(end)}</small></div>`;
+    const clock = window.PQRSLA.clock(end);
+    return `<div class="sla-clock ${clock.late ? 'late' : ''}" data-sla-due="${new Date(end).toISOString()}"><strong>${esc(clock.text)}</strong><small>Hasta ${esc(new Date(end).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short',timeZone:'America/Bogota'}))} · Bogotá</small></div>`;
   }
   function modal(title, contents) {
     $('#modal')?.remove();
@@ -233,6 +233,18 @@
     const { data, error } = await db.rpc('pqr_create_manual', { p_data: { ...payload, scope: 'external' } });
     if (error) throw error;
     return data;
+  }
+  function newBatchPqr() {
+    window.PQRBulk.open({
+      allowed: canCreateManualPqr(),clients,countries,esc,modal,
+      save: async (requestId,payload) => {
+        if (!canCreateManualPqr()) throw new Error('La carga múltiple solo está disponible en PQR de clientes.');
+        const {data,error}=await db.rpc('pqr_create_manual_batch',{p_request_id:requestId,p_data:payload});
+        if(error)throw error;
+        return data;
+      },
+      onSuccess: async result => {await load();modal('PQR de clientes registradas',window.PQRBulk.receipt(result,esc));}
+    });
   }
   async function adminFunction(payload) {
     const { data, error } = await db.functions.invoke('pqr-admin', { body: payload });
@@ -339,7 +351,7 @@
     const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
     const filter = role === 'validador' ? '' : `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
-    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 24 h</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
+    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 48 h (lun–vie)</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
@@ -362,7 +374,7 @@
   function analyst() {
     const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
     const cases = PQRReports.filterTickets(all, analystFilters);
-    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', canCreateManualPqr() ? '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>' : '')}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
     $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
     $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
     if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
@@ -377,7 +389,7 @@
     $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup, currentUserId: state.me.id });
     $('#view h1').textContent=`Dashboard · ${window.PQRScopes.label(workspace)}`;
     $('#view .manager-title .sub').textContent=workspace==='internal'?'Indicadores exclusivos de solicitudes internas, sin mezclar casos de clientes.':'Indicadores de clientes e históricos. No incluye solicitudes internas.';
-    if (canCreateManualPqr()) $('.export-actions')?.insertAdjacentHTML('afterbegin', '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button>');
+    if (canCreateManualPqr()) $('.export-actions')?.insertAdjacentHTML('afterbegin', manualPqrButtons());
     for(const key of ['type','country','study','month','origin','status','analyst'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
   }
   function completeData(ticket) {
@@ -557,6 +569,7 @@
     const canAdd = canAddAttachments(ticket);
     modal(`Detalle · ${ticket.code}`, `<div class="case-result"><p><strong>Trámite:</strong> ${esc(requestLabels[requestType(ticket)])} · <strong>Estudio:</strong> ${esc(ticket.client)} · <strong>País:</strong> ${esc(ticket.country)}${ticket.pdv ? ` · <strong>PDV:</strong> ${esc(ticket.pdv)}` : ''}</p><p><strong>Auditoría original:</strong> ${esc(ticket.auditOriginal || '—')}${requestType(ticket) === 'EDC' ? '' : ` · <strong>Nueva:</strong> ${esc(ticket.audit || '—')}`}</p><p><strong>${requestType(ticket) === 'EDC' ? 'Motivo de la edición' : 'Descripción'}:</strong> ${esc(ticket.description)}</p>${ticket.response ? `<p><strong>Respuesta:</strong> ${esc(ticket.response)}</p>` : ''}${ticket.redigitNotes && requestType(ticket) !== 'EDC' ? `<p><strong>Redigitación:</strong> ${esc(ticket.redigitNotes)}</p>` : ''}${requestType(ticket) === 'EDC' && ticket.editCompleted !== undefined ? `<p><strong>¿Se editó?</strong> ${ticket.editCompleted ? 'Sí' : 'No'}<br><strong>Comentario:</strong> ${esc(ticket.editComment || '—')}</p>` : ''}</div><section class="attachments-section"><h3>Adjuntos</h3><div id="attachment-list" data-ticket="${esc(ticket.id)}" aria-live="polite">Cargando adjuntos…</div>${canAdd ? `<form id="add-attachments" class="stack">${attachmentField()}<p class="attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="actions"><button class="secondary">Añadir archivos</button></div></form>` : ''}</section><h3>Paso a paso</h3><div class="timeline">${events.length ? events.map(item => `<div class="list-item"><strong>${esc(item.action)}</strong><br><small>${fmt(item.at)} · ${esc(item.actor)}</small><p>${esc(item.detail)}</p></div>`).join('') : '<p class="empty">Sin eventos.</p>'}</div>`);
     loadAttachments(ticket.id);
+    if (ticket.receivedAt) $('.case-result')?.insertAdjacentHTML('beforeend',`<p><strong>Fecha de recepción:</strong> ${esc(new Date(ticket.receivedAt).toLocaleString('es-CO',{timeZone:'America/Bogota'}))} · Bogotá<br><strong>Fecha de registro en el portal:</strong> ${fmt(ticket.createdAt)}</p>`);
     $('.case-result')?.insertAdjacentHTML('afterbegin',`<p><strong>Ámbito:</strong> ${esc(window.PQRScopes.label(window.PQRScopes.of(ticket)))}${ticket.requesterName?`<br><strong>Solicitante:</strong> ${esc(ticket.requesterName)} <small>(usuario/nombre declarado)</small>`:''}${ticket.requesterEmail?`<br><strong>Contacto:</strong> ${esc(ticket.requesterEmail)}`:''}</p>`);
     if (canEditManualPqr(ticket)) $('.case-result')?.insertAdjacentHTML('beforeend', `<button class="secondary" data-action="edit-manual-pqr" data-id="${esc(ticket.id)}">Editar radicación</button>`);
     if (ticket.manualEntry) $('.case-result')?.insertAdjacentHTML('beforeend', `<p><strong>Radicación manual</strong> · <strong>Registrada por:</strong> ${esc(ticket.createdByName || accountName(ticket.createdBy))}<br><strong>ID de ticket de origen:</strong> ${esc(ticket.externalTicketId || 'No indicado')}${ticket.commercialName||ticket.commercial?`<br><strong>Comercial asociado (registro anterior):</strong> ${esc(ticket.commercialName || accountName(ticket.commercial))}`:''}</p>${!ticket.pdv||!ticket.description?'<p class="sub">Información pendiente: el ID de PDV y la descripción deben completarse al dictaminar.</p>':''}`);
@@ -790,6 +803,7 @@
       if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
       if (type === 'new-ticket' || type === 'new-direct' || type === 'new-edit') return newTicket(type === 'new-ticket' ? 'PQR' : type === 'new-direct' ? 'RDG' : 'EDC');
       if (type === 'new-manual-pqr' && canCreateManualPqr()) return newTicket('PQR', true);
+      if (type === 'new-batch-pqr' && canCreateManualPqr()) return newBatchPqr();
       if (type === 'assign-validator' && ticket) return assignValidator(ticket);
       if (type === 'dictate' && ticket) return dictate(ticket);
       if (type === 'assign-redigit' && ticket) return assignRedigit(ticket);
@@ -839,5 +853,5 @@
   if (!db) { $('#app').innerHTML = '<main class="login-shell"><section class="login-card"><h1>Portal PQR</h1><p>No se pudo cargar la conexión segura. Recarga la página.</p></section></main>'; return; }
   window.addEventListener('hashchange',()=>{if(window.PQRNavigation.homeRoute(location.hash))renderHome();else if(location.hash==='#solicitud-interna')renderPublicInternal();else if(location.hash==='#consultar-ticket')renderPublicLookup();else{workspace=['#internas','#gestion'].includes(location.hash)?'internal':'external';load().catch(showError);}});
   load().catch(showError);
-  setInterval(() => { document.querySelectorAll('[data-sla-due]').forEach(element => { const end = new Date(element.dataset.slaDue).getTime(); const minutes = Math.ceil(Math.abs(end - Date.now()) / 60000); element.classList.toggle('late', end < Date.now()); element.querySelector('strong').textContent = `${end < Date.now() ? 'Vencido hace' : 'Restan'} ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`; }); }, 60000);
+  setInterval(() => { document.querySelectorAll('[data-sla-due]').forEach(element => { const clock=window.PQRSLA.clock(new Date(element.dataset.slaDue).getTime()); element.classList.toggle('late',clock.late); element.querySelector('strong').textContent=clock.text; }); },60000);
 })();
