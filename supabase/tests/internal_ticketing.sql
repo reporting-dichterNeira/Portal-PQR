@@ -13,7 +13,7 @@ begin
  select id into analyst_person from public.pqr_staff where active and role='validador' limit 1;
  select id into redigit_person from public.pqr_staff where active and role='redigitador' limit 1;
  assert analyst is not null and redigitator is not null and manager is not null and analyst_person is not null and redigit_person is not null;
- select count(*),md5(string_agg(data::text,'|' order by id)) into initial_count,original_digest from public.pqr_tickets;
+ select count(*),md5(string_agg(data::text,'|' order by id)) into initial_count,original_digest from public.pqr_tickets where data->>'scope' is distinct from 'internal';
  assert not has_table_privilege('anon','public.pqr_tickets','select');
  assert not has_table_privilege('anon','pqr_private.internal_receipts','select');
  assert not has_function_privilege('anon','public.pqr_create_manual_scoped(jsonb)','execute');
@@ -30,7 +30,7 @@ begin
   execute 'set local role anon';
   receipt:=public.pqr_submit_internal(request,payload);
   assert receipt->>'error' is null,receipt::text;
-  assert receipt->>'code' like kind||'-INT-%' and jsonb_array_length(receipt->'uploadPaths')=1;
+  assert receipt->>'code' like kind||'-I-%' and length(receipt->>'code')=19 and jsonb_array_length(receipt->'uploadPaths')=1;
   again:=public.pqr_submit_internal(request,payload);assert receipt=again,'Reintento no debe duplicar';
   result:=public.pqr_submit_internal(request,payload||'{"description":"Cambio después del envío"}');assert result ? 'error';
   lookup:=public.pqr_lookup_internal(' '||lower(receipt->>'code')||' ');
@@ -38,7 +38,7 @@ begin
   assert (select count(*) from jsonb_object_keys(lookup))=6;
   assert not (lookup ?| array['requesterName','requesterEmail','description','timeline','uploadPaths','id']);
   assert public.pqr_lookup_internal('PQR-2026-0019') is null;
-  assert public.pqr_lookup_internal(left(receipt->>'code',20)) is null;
+  assert public.pqr_lookup_internal(left(receipt->>'code',18)) is null;
   path:=receipt->'uploadPaths'->>0;
   assert pqr_private.internal_upload_allowed(path);
   assert not pqr_private.internal_upload_allowed(path||'.exe');
