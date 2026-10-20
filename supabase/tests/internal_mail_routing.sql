@@ -56,11 +56,8 @@ begin
   assert (select public.pqr_mail_ticket(e.id) from public.pqr_mail_events e where e.ticket_id=v_ticket limit 1) is null;
  end loop;
  payload:=payload||'{"requesterEmail":""}'::jsonb;
- receipt:=public.pqr_submit_internal(gen_random_uuid(),payload); assert receipt->>'error' is null,receipt::text;
- v_ticket:=(receipt->>'id')::uuid;
- assert not exists(select 1 from public.pqr_mail_events e where e.ticket_id=v_ticket and event_type='received');
- update public.pqr_tickets set status='Cerrado' where pqr_tickets.id=v_ticket;
- assert not exists(select 1 from public.pqr_mail_events e where e.ticket_id=v_ticket and event_type='closed');
+ receipt:=public.pqr_submit_internal(gen_random_uuid(),payload);
+ assert receipt->>'error'='El correo de contacto es obligatorio',receipt::text;
 end $$;
 select 'INTERNAL_MAIL_ROUTES_ACK_AND_COMPLETION_OK' as verification;
 rollback;

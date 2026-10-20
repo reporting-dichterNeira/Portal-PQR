@@ -1,5 +1,12 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const app=fs.readFileSync('docs/assets/production.js','utf8');
+test('public internal intake requires a contact email for every request type',()=>{
+ assert.match(app,/Correo de contacto \(obligatorio\)<input name="requesterEmail" type="email" required/);
+ assert.doesNotMatch(app,/Correo de contacto \(opcional\)/);
+ const migration=fs.readFileSync('supabase/migrations/20261020193001_internal_contact_email_required.sql','utf8');
+ assert.match(migration,/if email='' then raise exception 'El correo de contacto es obligatorio'/);
+ assert.doesNotMatch(migration,/grant |update public\.pqr_tickets/i);
+});
 function helpers(){const c=vm.createContext({window:{}});for(const name of ['scopes','navigation'])vm.runInContext(fs.readFileSync('docs/assets/'+name+'.js','utf8'),c);return c.window;}
 test('portal oficial separa clientes, internos e históricos; formulario y consulta no exigen sesión',()=>{
  const {PQRScopes:scopes,PQRNavigation:nav}=helpers();
