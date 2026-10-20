@@ -1,5 +1,4 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
-import nodemailer from 'npm:nodemailer@10.0.12';
 
 const sender = 'reporting.dichterneira@gmail.com';
 const portalUrl = 'https://reporting-dichterneira.github.io/Portal-PQR/';
@@ -9,15 +8,84 @@ const mailerToken = Deno.env.get('PQR_MAILER_TOKEN') ?? '';
 const gmailPassword = Deno.env.get('GMAIL_APP_PASSWORD') ?? '';
 
 const db = projectUrl && serviceKey ? createClient(projectUrl, serviceKey, { auth: { persistSession: false } }) : null;
-const transport = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: { user: sender, pass: gmailPassword },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 20000,
-});
+type OutgoingMail = { from: string; bcc: { address: string }[]; subject: string; text: string; messageId: string };
+const utf8Base64 = (value: string) => btoa(Array.from(new TextEncoder().encode(value), byte => String.fromCharCode(byte)).join(''));
+function encodedSubject(value: string) {
+  const parts: string[] = []; let part = '';
+  for (const character of value) {
+    if (new TextEncoder().encode(part + character).length > 42) { parts.push(part); part = ''; }
+    part += character;
+  }
+  if (part) parts.push(part);
+  return parts.map(item => `=?UTF-8?B?${utf8Base64(item)}?=`).join('\r\n ');
+}
+
+// Native Deno TLS avoids the Node SMTP compatibility hang in the hosted runtime.
+// Fixed Gmail destination, certificate validation enabled, no attachments or protocol logging.
+async function gmailSmtp(mail?: OutgoingMail) {
+  let connection: Deno.TlsConn | undefined;
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const session = async () => {
+    const connected = await Deno.connectTls({ hostname: 'smtp.gmail.com', port: 465 });
+    if (expired) { connected.close(); throw new Error('SMTP_TIMEOUT'); }
+    connection = connected;
+    let pending = '';
+    const write = async (value: string) => {
+      const bytes = new TextEncoder().encode(value); let offset = 0;
+      while (offset < bytes.length) {
+        const written = await connected.write(bytes.subarray(offset));
+        if (!written) throw new Error('SMTP_WRITE_FAILED');
+        offset += written;
+      }
+    };
+    const reply = async (expected: number[], stage: string) => {
+      let size = 0; let firstCode: number | undefined;
+      while (true) {
+        while (pending.includes('\r\n')) {
+          const end = pending.indexOf('\r\n'); const line = pending.slice(0, end); pending = pending.slice(end + 2);
+          const match = /^(\d{3})([ -])/.exec(line);
+          if (!match) throw new Error(`SMTP_${stage}_PROTOCOL`);
+          const code = Number(match[1]);
+          if (firstCode !== undefined && firstCode !== code) throw new Error(`SMTP_${stage}_PROTOCOL`);
+          firstCode = code;
+          if (match[2] === ' ') {
+            if (!expected.includes(code)) throw new Error(`SMTP_${stage}_${code}`);
+            return;
+          }
+        }
+        const buffer = new Uint8Array(4096); const count = await connected.read(buffer);
+        if (!count) throw new Error(`SMTP_${stage}_DISCONNECTED`);
+        size += count; if (size > 65536) throw new Error('SMTP_RESPONSE_TOO_LARGE');
+        pending += new TextDecoder().decode(buffer.subarray(0, count));
+      }
+    };
+    const command = async (value: string, expected: number[], stage: string) => { await write(value + '\r\n'); await reply(expected, stage); };
+    await reply([220], 'GREETING');
+    await command('EHLO reporting-dichterneira.github.io', [250], 'EHLO');
+    await command('AUTH LOGIN', [334], 'AUTH');
+    await command(btoa(sender), [334], 'AUTH');
+    await command(btoa(gmailPassword.replace(/\s/g, '')), [235], 'AUTH');
+    if (mail) {
+      if (mail.bcc.length !== 1 || !mailbox(mail.bcc[0].address) || !/^<pqr-[a-z0-9-]+@portal-pqr\.invalid>$/i.test(mail.messageId)) throw new Error('SMTP_INVALID_ENVELOPE');
+      await command(`MAIL FROM:<${sender}>`, [250], 'FROM');
+      await command(`RCPT TO:<${mail.bcc[0].address}>`, [250, 251], 'RECIPIENT');
+      await command('DATA', [354], 'DATA');
+      const body = utf8Base64(mail.text).match(/.{1,76}/g)?.join('\r\n') || '';
+      await write(`From: Portal PQR <${sender}>\r\nTo: undisclosed-recipients:;\r\nSubject: ${encodedSubject(mail.subject)}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${mail.messageId}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${body}\r\n.\r\n`);
+      await reply([250], 'ACCEPT');
+    }
+    // Close in finally; never turn a successful DATA acceptance into a retry on QUIT.
+  };
+  try {
+    await Promise.race([session(), new Promise((_, reject) => { timer = setTimeout(() => { expired = true; try { connection?.close(); } catch { /* already closed */ } reject(new Error('SMTP_TIMEOUT')); }, 25000); })]);
+  } finally {
+    expired = true;
+    if (timer) clearTimeout(timer);
+    try { connection?.close(); } catch { /* already closed after timeout */ }
+  }
+}
+const transport = { verify: () => gmailSmtp(), sendMail: (mail: OutgoingMail) => gmailSmtp(mail) };
 
 type MailEvent = {
   id: string;
@@ -119,8 +187,9 @@ Deno.serve(async request => {
     try {
       await transport.verify();
       return Response.json({ smtp: 'ready', sender });
-    } catch {
-      return Response.json({ error: 'Gmail rechazó la conexión. Revisa la contraseña de aplicación.' }, { status: 502 });
+    } catch (cause) {
+      const code = cause instanceof Error && /^SMTP_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'SMTP_CONNECTION_FAILED';
+      return Response.json({ error: 'No se pudo verificar Gmail', code }, { status: 502 });
     }
   }
   const due = new Date().toISOString();

@@ -13,9 +13,9 @@ function setup({direct=true,scope='internal',eventType='received',deleted=false,
   then(resolve,reject){return Promise.resolve(q.run()).then(resolve,reject)}
  };return q;}
  let source=fs.readFileSync('supabase/functions/pqr-mailer/index.ts','utf8').replace(/^import .*;\r?\n/gm,'');
- source+='\nglobalThis.qaMessage=message; globalThis.qaSend=sendEvent;';
+ source+='\ntransport.verify=qaTransport.verify; transport.sendMail=qaTransport.sendMail; globalThis.qaMessage=message; globalThis.qaSend=sendEvent;';
  const rpc=async(name,args)=>{assert.equal(name,'pqr_mail_ticket');assert.equal(args.p_event,event.id);return dbFail?{data:null,error:{message:'database permission error'}}:{data:scope==='internal'?{code:ticket.code,status:ticket.status,deleted_at:ticket.deleted_at,data:{scope,editCompleted:ticket.data.editCompleted}}:null,error:null};};
- const c=vm.createContext({Request,Response,console:{error(){}},createClient:()=>({from:query,rpc}),nodemailer:{createTransport:()=>({verify:async()=>{verify.push(true)},sendMail:async m=>{if(smtpFail)throw Error('SMTP_TEMPORARY');sent.push(m)}})},Deno:{env:{get:n=>({PQR_MAILER_TOKEN:'qa-token',GMAIL_APP_PASSWORD:'qa-password',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'qa-service'}[n])},serve:fn=>handler=fn}});
+ const c=vm.createContext({Request,Response,TextEncoder,TextDecoder,btoa,setTimeout,clearTimeout,console:{error(){}},createClient:()=>({from:query,rpc}),qaTransport:{verify:async()=>{verify.push(true)},sendMail:async m=>{if(smtpFail)throw Error('SMTP_TEMPORARY');sent.push(m)}},Deno:{env:{get:n=>({PQR_MAILER_TOKEN:'qa-token',GMAIL_APP_PASSWORD:'qa-password',SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'qa-service'}[n])},serve:fn=>handler=fn}});
  vm.runInContext(stripTypeScriptTypes(source),c);
  return {c,event,ticket,sent,verify,send:()=>c.qaSend({...event}),invoke:async(body={},token='qa-token')=>handler(new Request('https://example.invalid',{method:'POST',headers:{'x-pqr-mailer-token':token},body:JSON.stringify(body)}))};
 }
@@ -43,4 +43,29 @@ test('direct messages cannot target external cases and reject address injection'
 });
 test('scheduler authentication stays required and SMTP verification sends no email',async()=>{
  const f=setup();assert.equal((await f.invoke({},'wrong')).status,401);const response=await f.invoke({action:'verify_smtp'});assert.equal(response.status,200);assert.equal(f.verify.length,1);assert.equal(f.sent.length,0);
+});
+
+function smtpFixture(authCode=235,acceptCode=250){
+ let closed=0,offset=0;const writes=[];
+ const replies=Buffer.from(`220 Gmail\r\n250-smtp.gmail.com\r\n250 AUTH LOGIN\r\n334 username\r\n334 password\r\n${authCode} authenticated\r\n250 from\r\n250 recipient\r\n354 data\r\n${acceptCode} accepted\r\n`);
+ const conn={close(){closed++},async read(buffer){if(offset===replies.length)return null;const n=Math.min(7,buffer.length,replies.length-offset);buffer.set(replies.subarray(offset,offset+n));offset+=n;return n},async write(bytes){const n=Math.min(13,bytes.length);writes.push(Buffer.from(bytes.subarray(0,n)));return n}};
+ const source=fs.readFileSync('supabase/functions/pqr-mailer/index.ts','utf8').replace(/^import .*;\r?\n/gm,'')+'\nglobalThis.qaSmtp=gmailSmtp;';
+ const c=vm.createContext({Request,Response,TextEncoder,TextDecoder,btoa,setTimeout,clearTimeout,console,createClient:()=>({}),Deno:{env:{get:n=>({SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'qa',GMAIL_APP_PASSWORD:'qa-password'}[n])},serve(){},async connectTls(options){assert.equal(options.hostname,'smtp.gmail.com');assert.equal(options.port,465);assert.equal(options.unsafelyDisableHostnameVerification,undefined);return conn}}});
+ vm.runInContext(stripTypeScriptTypes(source),c);
+ return {send:mail=>c.qaSmtp(mail),transcript:()=>Buffer.concat(writes).toString(),closed:()=>closed};
+}
+test('native Gmail verification authenticates over validated TLS without sending a message',async()=>{
+ const f=smtpFixture();await f.send();assert.ok(f.closed());assert.match(f.transcript(),/AUTH LOGIN/);assert.doesNotMatch(f.transcript(),/MAIL FROM|RCPT TO|DATA/);
+});
+test('native SMTP supports partial IO, multiline replies, UTF-8 and private envelope recipients',async()=>{
+ const f=smtpFixture();const subject='Solicitud interna finalizada · EDC-INT-2026-0009';const text='Edición finalizada.\nLínea de prueba: áéíóú';
+ await f.send({from:'unused',bcc:[{address:'qa@example.invalid'}],subject,text,messageId:'<pqr-event-qa@portal-pqr.invalid>'});
+ const transcript=f.transcript();assert.match(transcript,/RCPT TO:<qa@example.invalid>/);const mime=transcript.slice(transcript.indexOf('From: Portal PQR'));
+ assert.doesNotMatch(mime,/qa@example.invalid|Bcc:/);const encoded=mime.split('Subject: ')[1].split('\r\nDate:')[0];
+ assert.equal([...encoded.matchAll(/=\?UTF-8\?B\?([^?]+)\?=/g)].map(m=>Buffer.from(m[1],'base64').toString()).join(''),subject);
+ const body=mime.split('\r\n\r\n')[1].split('\r\n.\r\n')[0];assert.equal(Buffer.from(body.replace(/\r\n/g,''),'base64').toString(),text);assert.ok(f.closed());
+});
+test('native SMTP rejects failed authentication and rejected DATA without exposing credentials',async()=>{
+ const auth=smtpFixture(535);await assert.rejects(auth.send(),/SMTP_AUTH_535/);assert.doesNotMatch(auth.transcript(),/MAIL FROM/);assert.ok(auth.closed());
+ const data=smtpFixture(235,550);await assert.rejects(data.send({from:'',bcc:[{address:'qa@example.invalid'}],subject:'Test',text:'Test',messageId:'<pqr-event-qa@portal-pqr.invalid>'}),/SMTP_ACCEPT_550/);assert.ok(data.closed());
 });
