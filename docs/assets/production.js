@@ -325,19 +325,16 @@
   function renderApp() {
     const me = state.me;
     $('#app').innerHTML = `<header class="app-header"><div class="brand"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Portal PQR</div></div><nav class="nav" aria-label="Bandeja"><span class="active">${esc(roles[me.role])}</span></nav><div class="user"><span><strong>${esc(me.name)}</strong><br><small>@${esc(me.username)}</small></span><button class="ghost" data-action="notifications">Notificaciones${state.notifications.filter(item => !item.read).length ? ` (${state.notifications.filter(item => !item.read).length})` : ''}</button><button class="ghost" data-action="password">Contraseña</button><button class="ghost" data-action="logout">Salir</button></div></header><main class="layout" id="view"></main>`;
-    if(window.PQRScopes.eligible(me.role))$('#view').insertAdjacentHTML('beforebegin',`<nav class="scope-tabs layout" aria-label="Separar solicitudes"><a href="#inicio" class="scope-home">← Inicio</a><button data-action="workspace" data-scope="external">PQR de clientes</button><button data-action="workspace" data-scope="internal">PQR internas</button><a href="#solicitud-interna">Enviar solicitud interna · sin cuenta ↗</a></nav>`);
-    $('#view').insertAdjacentHTML('beforebegin','<div class="layout" id="module-context"></div>');
+    $('#view').insertAdjacentHTML('beforebegin',window.PQRNavigation.workspaceNav(workspace,me.role));
     renderView();
   }
   function renderView() {
     const role = state.me.role;
     document.title=`${window.PQRScopes.label(workspace)} · ${roles[role]}`;
     if(workspace==='internal'&&!window.PQRScopes.eligible(role)){
-      $('#module-context').innerHTML=window.PQRNavigation.context('internal','comercial');
       $('#view').innerHTML='<section class="card"><h1>Este es el seguimiento del equipo</h1><p>Con una cuenta Comercial puedes gestionar tus PQR de clientes. Para enviar una solicitud interna no necesitas una cuenta ni entrar a esta bandeja.</p><div class="actions"><a class="primary module-link" href="#solicitud-interna">Enviar solicitud interna</a><a class="ghost module-link" href="#clientes">Ir a mis PQR de clientes</a><a href="#inicio">Volver al inicio</a></div></section>';return;
     }
     if(!window.PQRScopes.eligible(role))workspace='external';
-    $('#module-context').innerHTML=window.PQRNavigation.context(workspace,role);
     $('#view').dataset.workspace=workspace;
     document.querySelectorAll('[data-action="workspace"]').forEach(b=>{const active=b.dataset.scope===workspace;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
     if (role === 'comercial') return commercial();
