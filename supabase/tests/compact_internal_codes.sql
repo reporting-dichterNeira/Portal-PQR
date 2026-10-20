@@ -1,5 +1,10 @@
 -- No business data, notifications, or permissions survive this test.
 begin;
+create temporary sequence compact_test_seq start 9999;
+do $$ begin
+ execute replace(pg_get_functiondef('pqr_private.new_internal_code(text)'::regprocedure),
+  'pqr_private.internal_code_seq','pg_temp.compact_test_seq');
+end $$;
 do $$
 declare kind text; codes text[]:='{}'; code text; n integer; target_id uuid; legacy text; lookup jsonb;
 begin
@@ -10,7 +15,8 @@ begin
  foreach kind in array array['PQR','RDG','EDC'] loop
   for n in 1..100 loop
    code:=pqr_private.new_internal_code(kind);
-   assert code ~ '^(PQR|RDG|EDC)-I-[0-9A-HJKMNP-TV-Z]{13}$' and length(code)=19;
+   assert code ~ '^(PQR|RDG|EDC)-INT-[0-9]{4}-[0-9]{4,}$';
+   assert split_part(code,'-',4)::bigint=9998+cardinality(codes)+1,'El consecutivo es general, sin truncar 10000';
    assert not code=any(codes); codes:=array_append(codes,code);
   end loop;
  end loop;
@@ -23,7 +29,7 @@ begin
   lookup:=public.pqr_lookup_internal(' '||lower(legacy)||' ');
   assert lookup->>'code'=code and (select count(*) from jsonb_object_keys(lookup))=6;
   assert public.pqr_lookup_internal(code)=lookup;
-  assert public.pqr_lookup_internal(left(code,18)) is null;
+  assert public.pqr_lookup_internal(left(code,length(code)-1)) is null;
   execute 'reset role';
   update public.pqr_tickets set deleted_at=now() where pqr_tickets.id=target_id;
   execute 'set local role anon';

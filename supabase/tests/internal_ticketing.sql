@@ -1,5 +1,11 @@
 -- Entire test transaction rolls back: no tickets, notifications, mail or grants survive.
 begin;
+-- Use an isolated counter: rollback alone does not undo nextval on a real sequence.
+create temporary sequence internal_flow_test_seq start 1000000;
+do $$ begin
+ execute replace(pg_get_functiondef('pqr_private.new_internal_code(text)'::regprocedure),
+  'pqr_private.internal_code_seq','pg_temp.internal_flow_test_seq');
+end $$;
 do $$
 declare
  analyst uuid; redigitator uuid; manager uuid; commercial uuid; analyst_person uuid; redigit_person uuid;
@@ -30,7 +36,7 @@ begin
   execute 'set local role anon';
   receipt:=public.pqr_submit_internal(request,payload);
   assert receipt->>'error' is null,receipt::text;
-  assert receipt->>'code' like kind||'-I-%' and length(receipt->>'code')=19 and jsonb_array_length(receipt->'uploadPaths')=1;
+  assert receipt->>'code' ~ ('^'||kind||'-INT-[0-9]{4}-[0-9]{4,}$') and jsonb_array_length(receipt->'uploadPaths')=1;
   again:=public.pqr_submit_internal(request,payload);assert receipt=again,'Reintento no debe duplicar';
   result:=public.pqr_submit_internal(request,payload||'{"description":"Cambio después del envío"}');assert result ? 'error';
   lookup:=public.pqr_lookup_internal(' '||lower(receipt->>'code')||' ');
@@ -38,7 +44,7 @@ begin
   assert (select count(*) from jsonb_object_keys(lookup))=6;
   assert not (lookup ?| array['requesterName','requesterEmail','description','timeline','uploadPaths','id']);
   assert public.pqr_lookup_internal('PQR-2026-0019') is null;
-  assert public.pqr_lookup_internal(left(receipt->>'code',18)) is null;
+  assert public.pqr_lookup_internal(left(receipt->>'code',length(receipt->>'code')-1)) is null;
   path:=receipt->'uploadPaths'->>0;
   assert pqr_private.internal_upload_allowed(path);
   assert not pqr_private.internal_upload_allowed(path||'.exe');
