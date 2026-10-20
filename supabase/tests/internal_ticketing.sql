@@ -90,7 +90,9 @@ begin
    result:=public.pqr_action('verify',internal_id,'{"ok":"yes","comment":"Verificación de prueba correcta"}');assert result->>'status'='Cerrado';
    execute 'reset role';
   end if;
-  assert not exists(select 1 from public.pqr_mail_events where ticket_id=internal_id and event_type='closed'),'Sin cuenta comercial no se envía correo a un tercero';
+  assert exists(select 1 from public.pqr_mail_events where ticket_id=internal_id and event_type='received' and recipient_email='qa@example.invalid');
+  assert (select count(*) from public.pqr_mail_events where ticket_id=internal_id and event_type='closed' and recipient_email='qa@example.invalid')=1;
+  assert not exists(select 1 from public.pqr_mail_events where ticket_id=internal_id and event_type='closed' and recipient_profile_id is not null),'El cierre interno avisa al solicitante, no a una cuenta Comercial';
   perform set_config('request.jwt.claim.sub','',true);execute 'set local role anon';
   lookup:=public.pqr_lookup_internal(receipt->>'code');assert lookup->>'status'='Cerrado' and lookup->>'closedAt' is not null;
   execute 'reset role';
