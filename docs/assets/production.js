@@ -9,7 +9,8 @@
   const publicResult = result => { if (result.data?.error) return { data: null, error: new Error(result.data.error) }; return result; };
   const internalAPI = {
     lookup: async code => publicResult(await publicDb.rpc('pqr_lookup_internal', { p_code: code })),
-    submit: async (requestId, payload) => publicResult(await publicDb.rpc('pqr_submit_internal', { p_request_id: requestId, p_data: payload }))
+    submit: async (requestId, payload) => publicResult(await publicDb.rpc('pqr_submit_internal', { p_request_id: requestId, p_data: payload })),
+    submitBatch: async (requestId, payload) => publicResult(await publicDb.rpc('pqr_submit_internal_batch', { p_request_id: requestId, p_data: payload }))
   };
   async function uploadInternalAttachments(ticket, files, status) {
     const failed = [];
@@ -488,32 +489,53 @@
     $('#public-audit-label').firstChild.textContent=kind==='PQR'?'ID de auditoría (opcional para PQR)':'ID de auditoría actual';
     $('#public-pdv-label').firstChild.textContent=kind==='EDC'?'ID de PDV (opcional)':'ID de PDV';
     document.querySelectorAll('[data-intake-kind]').forEach(button=>{button.setAttribute('aria-pressed',String(button.dataset.intakeKind===kind));});
+    form.pqrInternalBulk?.syncKind();
   }
   function renderPublicInternal() {
     document.title='Enviar solicitud interna · Portal PQR';
     $('#app').innerHTML=`${window.PQRNavigation.publicHeader()}<main class="public-internal public-intake"><div class="public-hero"><span class="eyebrow">ESTAMOS PARA AYUDARTE</span><h1>¿Qué necesitas solicitar?</h1><p>Elige el tipo de solicitud y cuéntanos qué necesitas. Te entregaremos un radicado para hacer seguimiento.</p></div>${window.PQRNavigation.intakeChoices()}<section class="card intake-form-card"><div class="intake-form-heading"><span class="form-heading-icon">${window.PQRNavigation.icon('ticket')}</span><div><h2>Cuéntanos los detalles</h2><p>Completa los datos de tu solicitud. Los campos opcionales están indicados.</p></div></div><form id="public-internal-form" class="form-grid"><fieldset class="intake-section full"><legend><span>01</span> Tus datos</legend><div class="form-grid"><label>Usuario o nombre del solicitante<input name="requesterName" required minlength="3" maxlength="150" autocomplete="name" placeholder="Escribe tu nombre o usuario"></label><label>Correo de contacto (obligatorio)<input name="requesterEmail" type="email" required maxlength="254" autocomplete="email" placeholder="nombre@empresa.com"><small>Te avisaremos al recibir y finalizar tu solicitud. No crea una cuenta.</small></label></div></fieldset><fieldset class="intake-section full"><legend><span>02</span> Tu solicitud</legend><div class="form-grid"><label>Tipo de solicitud<select name="kind" required><option value="PQR">PQR interna</option><option value="RDG">Redigitación directa</option><option value="EDC">Edición de auditoría</option></select></label><label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="public-other-client">Otro estudio<input name="clientOther" maxlength="100" placeholder="Nombre del estudio"></label><label>País<select name="country" required>${options(countries)}</select></label><label id="public-pdv-label">ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric maxlength="80" required placeholder="Ej. 123456"></label><label class="full" id="public-audit-label">ID de auditoría (opcional para PQR)<input name="auditOriginal" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric maxlength="80" placeholder="Número de la auditoría"></label><label class="full">Descripción / motivo<textarea name="description" required minlength="8" maxlength="12000" placeholder="Cuéntanos qué ocurrió y qué necesitas que revisemos…"></textarea></label></div></fieldset><fieldset class="intake-section full"><legend><span>03</span> Archivos de apoyo <small>Opcional</small></legend>${attachmentField()}</fieldset><div class="intake-form-footer full"><p>${window.PQRNavigation.icon('lock')}No compartas contraseñas. Tu nombre identifica la solicitud, pero no autentica tu identidad.</p><button class="primary" type="submit">Enviar solicitud interna ${window.PQRNavigation.icon('arrow')}</button></div><p id="public-intake-error" class="full sub" role="alert"></p><p id="upload-progress" class="full sub" role="status"></p></form></section><p class="public-followup">¿Ya tienes un radicado? <a href="#consultar-ticket">Consulta aquí el estado de tu ticket ${window.PQRNavigation.icon('arrow')}</a></p></main>`;
     document.querySelector('main.public-internal').insertAdjacentHTML('afterbegin',window.PQRNavigation.publicIntro());
     const form=$('#public-internal-form'), requestId=crypto.randomUUID();bindAttachmentSelection(form);
+    const internalBatch=window.PQRInternalBulk.bind(form,esc);form.pqrInternalBulk=internalBatch;
     form.querySelectorAll('[data-numeric]').forEach(input=>input.addEventListener('input',()=>{input.value=input.value.replace(/\D/g,'');}));
     form.elements.kind.onchange=()=>syncIntakeKind(form);
     document.querySelectorAll('[data-intake-kind]').forEach(button=>{button.onclick=()=>{form.elements.kind.value=button.dataset.intakeKind;syncIntakeKind(form);};});
     syncIntakeKind(form);
     form.elements.client.onchange=()=>{const other=form.elements.client.value==='Otros';$('#public-other-client').classList.toggle('hide',!other);form.elements.clientOther.required=other;};
     form.onsubmit=async event=>{
-      event.preventDefault();if(busy)return;busy=true;lock(form,true);$('#public-intake-error').textContent='';
+      event.preventDefault();if(busy)return;$('#public-intake-error').textContent='';
       let created;
       try{
+        if(!form.reportValidity())return;
         const files=checkedAttachments(form.elements.attachments),values=formData(form);
         const payload=Object.fromEntries(['requesterName','requesterEmail','kind','country','pdv','auditOriginal','description'].map(key=>[key,String(values[key]||'').trim()]));
         payload.client=(values.client==='Otros'?values.clientOther:values.client||'').trim();
         payload.files=files.map(file=>({name:file.name,size:file.size}));
+        if(internalBatch.active){
+          const rows=internalBatch.read();
+          if(files.reduce((n,file)=>n+file.size,0)*rows.length>100*1024*1024)throw new Error('Los adjuntos superarían 100 MB al copiarlos a todas las solicitudes. Reduce los archivos o divide el envío.');
+          const batch={requesterName:payload.requesterName,requesterEmail:payload.requesterEmail,kind:payload.kind,client:payload.client,country:payload.country,files:payload.files,rows};
+          busy=true;lock(form,true);
+          form.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=true);
+          const result=await internalAPI.submitBatch(requestId,batch);if(result.error)throw result.error;created=result.data;
+          const failures=[];
+          for(const ticket of created.tickets){
+            $('#upload-progress').textContent='Adjuntando soportes a '+ticket.code;
+            try{const failed=await uploadInternalAttachments(ticket,files,null);if(failed.length)failures.push(ticket.code+': '+failed.join(', '));}catch{failures.push(ticket.code+': no se confirmó la carga');}
+          }
+          document.querySelector('main.public-internal').innerHTML=window.PQRInternalBulk.receipt(created,esc,failures);
+          $('#another-internal').onclick=renderPublicInternal;
+          $('#download-internal-codes').onclick=()=>window.PQRInternalBulk.download(created);
+          return;
+        }
+        busy=true;lock(form,true);
         const result=await internalAPI.submit(requestId,payload);if(result.error)throw result.error;created=result.data;
         const failed=await uploadInternalAttachments(created,files,$('#upload-progress'));
         const main=document.querySelector('main.public-internal');
         main.innerHTML=`<section class="card internal-receipt" role="status"><span class="eyebrow">SOLICITUD INTERNA REGISTRADA</span><h1>${esc(created.code)}</h1><p>Conserva este radicado para consultar con el equipo. Tu solicitud aparecerá únicamente en la bandeja interna, no en PQR de clientes.</p><p><strong>Tipo:</strong> ${esc(requestLabels[created.requestType])} · <strong>Solicitante:</strong> ${esc(payload.requesterName)}</p>${failed.length?`<p role="alert">La solicitud se creó, pero no se cargaron: ${failed.map(esc).join(', ')}. Entrega los archivos al equipo indicando este radicado; no dupliques la solicitud.</p>`:files.length?'<p>Los adjuntos seleccionados se guardaron de forma privada.</p>':'<p>No se añadieron adjuntos.</p>'}<p class="sub">Guarda tu radicado completo para consultar el estado en «Consultar mi ticket».</p><div class="actions"><button class="primary" id="another-internal">Enviar otra solicitud</button><a class="ghost module-link" href="#consultar-ticket">Consultar mi ticket</a><a href="#internas">Volver al seguimiento del equipo</a></div></section>`;
         $('#another-internal').onclick=renderPublicInternal;
-      }catch(error){const message=created?`Se registró ${created.code}, pero falló la carga de adjuntos. No vuelvas a enviar el formulario: entrega el soporte al equipo con ese radicado.`:error.message;$('#public-intake-error').textContent=message;if(created){form.onsubmit=event=>event.preventDefault();}}
-      finally{busy=false;if(!created)lock(form,false);}
+      }catch(error){const codes=created?.tickets?.map(t=>t.code).join(', ')||created?.code;const message=created?`Se registró ${codes}. No vuelvas a enviar el formulario: entrega el soporte al equipo con esos radicados.`:error.message;const output=$('#public-intake-error');if(output)output.textContent=message;if(created){form.onsubmit=event=>event.preventDefault();}}
+      finally{busy=false;if(!created){form.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=false);lock(form,false);internalBatch.restore();}}
     };
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
