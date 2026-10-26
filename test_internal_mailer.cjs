@@ -1,8 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {stripTypeScriptTypes}=require('node:module');
-function setup({direct=true,scope='internal',eventType='received',deleted=false,inactive=false,smtpFail=false,dbFail=false}={}){
+function setup({direct=true,scope='internal',eventType='received',deleted=false,inactive=false,smtpFail=false,dbFail=false,recipients=null,copies=[],replay=null}={}){
  let handler;const sent=[],verify=[];
- const event={id:'event-qa',ticket_id:'ticket-qa',recipient_profile_id:direct?null:'profile-qa',recipient_email:direct?'person@example.invalid':null,event_type:eventType,status:'pending',locked_at:null,attempts:0,next_attempt_at:'2026-01-01'};
+ const event={id:'event-qa',ticket_id:'ticket-qa',recipient_profile_id:direct?null:'profile-qa',recipient_email:direct?'person@example.invalid':null,recipient_emails:recipients,cc_emails:copies,replay_key:replay,event_type:eventType,status:'pending',locked_at:null,attempts:0,next_attempt_at:'2026-01-01'};
  const ticket={id:'ticket-qa',code:'EDC-INT-2026-0009',status:'Cerrado',deleted_at:deleted?'2026-01-01':null,data:{scope,editCompleted:true,editComment:'PRIVATE_COMMENT',description:'PRIVATE_DESCRIPTION',requesterEmail:'person@example.invalid'}};
  const rows={pqr_mail_events:[event],pqr_tickets:[ticket],pqr_profiles:[{id:'profile-qa',active:!inactive}],pqr_contact_emails:[{profile_id:'profile-qa',email:'staff@example.invalid'}]};
  function query(table){let filters=[],update=null,done;const q={
@@ -45,9 +45,9 @@ test('scheduler authentication stays required and SMTP verification sends no ema
  const f=setup();assert.equal((await f.invoke({},'wrong')).status,401);const response=await f.invoke({action:'verify_smtp'});assert.equal(response.status,200);assert.equal(f.verify.length,1);assert.equal(f.sent.length,0);
 });
 
-function smtpFixture(authCode=235,acceptCode=250){
+function smtpFixture(authCode=235,acceptCode=250,recipientCodes=[250]){
  let closed=0,offset=0;const writes=[];
- const replies=Buffer.from(`220 Gmail\r\n250-smtp.gmail.com\r\n250 AUTH LOGIN\r\n334 username\r\n334 password\r\n${authCode} authenticated\r\n250 from\r\n250 recipient\r\n354 data\r\n${acceptCode} accepted\r\n`);
+ const replies=Buffer.from(`220 Gmail\r\n250-smtp.gmail.com\r\n250 AUTH LOGIN\r\n334 username\r\n334 password\r\n${authCode} authenticated\r\n250 from\r\n${recipientCodes.map(code=>`${code} recipient\r\n`).join('')}354 data\r\n${acceptCode} accepted\r\n`);
  const conn={close(){closed++},async read(buffer){if(offset===replies.length)return null;const n=Math.min(7,buffer.length,replies.length-offset);buffer.set(replies.subarray(offset,offset+n));offset+=n;return n},async write(bytes){const n=Math.min(13,bytes.length);writes.push(Buffer.from(bytes.subarray(0,n)));return n}};
  const source=fs.readFileSync('supabase/functions/pqr-mailer/index.ts','utf8').replace(/^import .*;\r?\n/gm,'')+'\nglobalThis.qaSmtp=gmailSmtp;';
  const c=vm.createContext({Request,Response,TextEncoder,TextDecoder,btoa,setTimeout,clearTimeout,console,createClient:()=>({}),Deno:{env:{get:n=>({SUPABASE_URL:'https://example.invalid',SUPABASE_SERVICE_ROLE_KEY:'qa',GMAIL_APP_PASSWORD:'qa-password'}[n])},serve(){},async connectTls(options){assert.equal(options.hostname,'smtp.gmail.com');assert.equal(options.port,465);assert.equal(options.unsafelyDisableHostnameVerification,undefined);return conn}}});
@@ -68,4 +68,39 @@ test('native SMTP supports partial IO, multiline replies, UTF-8 and private enve
 test('native SMTP rejects failed authentication and rejected DATA without exposing credentials',async()=>{
  const auth=smtpFixture(535);await assert.rejects(auth.send(),/SMTP_AUTH_535/);assert.doesNotMatch(auth.transcript(),/MAIL FROM/);assert.ok(auth.closed());
  const data=smtpFixture(235,550);await assert.rejects(data.send({from:'',bcc:[{address:'qa@example.invalid'}],subject:'Test',text:'Test',messageId:'<pqr-event-qa@portal-pqr.invalid>'}),/SMTP_ACCEPT_550/);assert.ok(data.closed());
+});
+test('one operational message reaches the team with a separate monitoring CC, deduplicated',async()=>{
+ for(const eventType of ['new_pqr','new_redigit']){
+  const f=setup({eventType,recipients:['staff1@example.invalid','staff2@example.invalid','STAFF1@example.invalid','copy@example.invalid'],copies:['copy@example.invalid']});
+  assert.equal(await f.send(),'sent');assert.equal(f.sent.length,1);
+  assert.deepEqual(Array.from(f.sent[0].bcc,x=>x.address),['staff1@example.invalid','staff2@example.invalid']);
+  assert.deepEqual(Array.from(f.sent[0].cc,x=>x.address),['copy@example.invalid']);
+  assert.doesNotMatch(f.sent[0].text,/PRIVATE_COMMENT|PRIVATE_DESCRIPTION|person@example/);assert.match(f.sent[0].text,/#gestion/);
+ }
+});
+test('requester acknowledgements and completion cannot copy team recipients or observers',async()=>{
+ for(const eventType of ['received','closed'])for(const opts of [{recipients:['staff@example.invalid']},{copies:['copy@example.invalid']}]){
+  const f=setup({eventType,...opts});assert.equal(await f.send(),'failed');assert.equal(f.sent.length,0);
+ }
+});
+test('explicit historical replays are labelled and never change the ticket',async()=>{
+ const f=setup({eventType:'new_pqr',recipients:['team@example.invalid'],replay:'grouped-mail-qa'});
+ const before=JSON.stringify(f.ticket);assert.equal(await f.send(),'sent');assert.match(f.sent[0].subject,/^\[Reenvío\]/);
+ assert.match(f.sent[0].text,/No se creó otro ticket/);assert.equal(JSON.stringify(f.ticket),before);
+});
+test('SMTP sends one DATA payload to all team recipients and CC without exposing BCC addresses',async()=>{
+ const f=smtpFixture(235,250,[250,250,250]);
+ await f.send({from:'',bcc:[{address:'one@example.invalid'},{address:'two@example.invalid'},{address:'copy@example.invalid'}],cc:[{address:'copy@example.invalid'}],subject:'Team',text:'Notice',messageId:'<pqr-group-qa@portal-pqr.invalid>'});
+ const transcript=f.transcript();assert.equal((transcript.match(/RCPT TO:/g)||[]).length,3);assert.equal((transcript.match(/\r\nDATA\r\n/g)||[]).length,1);
+ const mime=transcript.slice(transcript.indexOf('From: Portal PQR'));assert.match(mime,/Cc: copy@example.invalid\r\n/);assert.doesNotMatch(mime,/one@example.invalid|two@example.invalid|Bcc:/);
+});
+test('rejection of any group recipient sends no DATA and is retryable',async()=>{
+ const f=smtpFixture(235,250,[250,550]);
+ await assert.rejects(f.send({from:'',bcc:[{address:'one@example.invalid'},{address:'two@example.invalid'}],subject:'Team',text:'Notice',messageId:'<pqr-group-qa@portal-pqr.invalid>'}),/SMTP_RECIPIENT_550/);
+ assert.doesNotMatch(f.transcript(),/\r\nDATA\r\n/);assert.ok(f.closed());
+});
+test('SMTP rejects injection in copies and excessive envelope recipients',async()=>{
+ for(const cc of [[{address:'one@example.invalid\r\nBcc: attack@example.invalid'}],Array.from({length:21},(_,i)=>({address:`copy${i}@example.invalid`}))]){
+  const f=smtpFixture();await assert.rejects(f.send({from:'',bcc:[{address:'one@example.invalid'}],cc,subject:'Test',text:'Test',messageId:'<pqr-group-qa@portal-pqr.invalid>'}),/SMTP_INVALID_ENVELOPE/);assert.doesNotMatch(f.transcript(),/MAIL FROM/);
+ }
 });

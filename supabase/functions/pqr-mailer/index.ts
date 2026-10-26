@@ -8,7 +8,11 @@ const mailerToken = Deno.env.get('PQR_MAILER_TOKEN') ?? '';
 const gmailPassword = Deno.env.get('GMAIL_APP_PASSWORD') ?? '';
 
 const db = projectUrl && serviceKey ? createClient(projectUrl, serviceKey, { auth: { persistSession: false } }) : null;
-type OutgoingMail = { from: string; bcc: { address: string }[]; subject: string; text: string; messageId: string };
+type OutgoingMail = { from: string; bcc: { address: string }[]; cc?: { address: string }[]; subject: string; text: string; messageId: string };
+function addresses(values: unknown): string[] {
+  if (!Array.isArray(values) || values.length > 20 || !values.every(mailbox)) throw new Error('SMTP_INVALID_ENVELOPE');
+  return [...new Set(values.map(value => value.toLowerCase()))];
+}
 const utf8Base64 = (value: string) => btoa(Array.from(new TextEncoder().encode(value), byte => String.fromCharCode(byte)).join(''));
 function encodedSubject(value: string) {
   const parts: string[] = []; let part = '';
@@ -67,12 +71,17 @@ async function gmailSmtp(mail?: OutgoingMail) {
     await command(btoa(sender), [334], 'AUTH');
     await command(btoa(gmailPassword.replace(/\s/g, '')), [235], 'AUTH');
     if (mail) {
-      if (mail.bcc.length !== 1 || !mailbox(mail.bcc[0].address) || !/^<pqr-[a-z0-9-]+@portal-pqr\.invalid>$/i.test(mail.messageId)) throw new Error('SMTP_INVALID_ENVELOPE');
+      const cc = addresses((mail.cc ?? []).map(item => item.address));
+      const bcc = addresses(mail.bcc.map(item => item.address)).filter(address => !cc.includes(address));
+      const recipients = [...bcc, ...cc];
+      if (!recipients.length || recipients.length > 20 || !/^<pqr-[a-z0-9-]+@portal-pqr\.invalid>$/i.test(mail.messageId)) throw new Error('SMTP_INVALID_ENVELOPE');
       await command(`MAIL FROM:<${sender}>`, [250], 'FROM');
-      await command(`RCPT TO:<${mail.bcc[0].address}>`, [250, 251], 'RECIPIENT');
+      // Accept every envelope recipient before DATA. A rejected address sends no partial message.
+      for (const address of recipients) await command(`RCPT TO:<${address}>`, [250, 251], 'RECIPIENT');
       await command('DATA', [354], 'DATA');
       const body = utf8Base64(mail.text).match(/.{1,76}/g)?.join('\r\n') || '';
-      await write(`From: Portal PQR <${sender}>\r\nTo: undisclosed-recipients:;\r\nSubject: ${encodedSubject(mail.subject)}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${mail.messageId}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${body}\r\n.\r\n`);
+      const copyHeader = cc.length ? `Cc: ${cc.join(', ')}\r\n` : '';
+      await write(`From: Portal PQR <${sender}>\r\nTo: undisclosed-recipients:;\r\n${copyHeader}Subject: ${encodedSubject(mail.subject)}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${mail.messageId}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${body}\r\n.\r\n`);
       await reply([250], 'ACCEPT');
     }
     // Close in finally; never turn a successful DATA acceptance into a retry on QUIT.
@@ -92,6 +101,9 @@ type MailEvent = {
   ticket_id: string;
   recipient_profile_id: string | null;
   recipient_email?: string | null;
+  recipient_emails?: string[] | null;
+  cc_emails?: string[];
+  replay_key?: string | null;
   event_type: 'new_pqr' | 'new_redigit' | 'received' | 'closed';
   status: 'pending' | 'sending' | 'sent';
   locked_at: string | null;
@@ -121,7 +133,8 @@ function message(event: MailEvent, ticket: { code: string; status: string; data:
   const followup = requester ? `Consulta el estado con tu radicado: ${portalUrl}#consultar-ticket`
     : internal ? `Ingresa con tu cuenta a PQR internas para atender el caso: ${portalUrl}#gestion`
     : `Ingresa al portal para consultar el caso y sus adjuntos: ${portalUrl}`;
-  return { subject, text: `${intro}\n\nRadicado: ${code}\nEstado: ${ticket.status}${comment}\n${followup}\n` };
+  const replay = event.replay_key ? 'Reenvío de un aviso anterior para comprobar la entrega. No se creó otro ticket.\n\n' : '';
+  return { subject: `${event.replay_key ? '[Reenvío] ' : ''}${subject}`, text: `${replay}${intro}\n\nRadicado: ${code}\nEstado: ${ticket.status}${comment}\n${followup}\n` };
 }
 
 const mailbox = (value: unknown): value is string => typeof value === 'string' && value.length <= 254
@@ -145,16 +158,22 @@ async function sendEvent(event: MailEvent) {
       if (error) throw error;
       return 'skipped';
     }
-    const emails = [event.recipient_email];
+    const team = ['new_pqr', 'new_redigit'].includes(event.event_type);
+    // Requester receipts/completions can never inherit a team's addresses or monitoring copies.
+    if (!team && (event.recipient_emails != null || (event.cc_emails ?? []).length)) throw new Error('SMTP_INVALID_ENVELOPE');
+    const copies = team ? addresses(event.cc_emails ?? []) : [];
+    const emails = addresses(team && event.recipient_emails != null ? event.recipient_emails : [event.recipient_email])
+      .filter(address => !copies.includes(address));
     if (ticket.deleted_at) {
       await db!.from('pqr_mail_events').update({ status: 'sent', sent_at: new Date().toISOString(), last_error: 'Destinatario inactivo o caso eliminado' }).eq('id', event.id);
       return 'skipped';
     }
-    if (!emails.length || !emails.every(mailbox)) throw new Error('La cuenta destinataria no tiene correos de aviso válidos');
+    if (!emails.length && !copies.length || emails.length + copies.length > 20) throw new Error('SMTP_INVALID_ENVELOPE');
     const content = message(event, ticket);
     await transport.sendMail({
       from: `Portal PQR <${sender}>`,
       bcc: emails.map(address => ({ address })),
+      cc: copies.map(address => ({ address })),
       subject: content.subject,
       text: content.text,
       messageId: `<pqr-${event.id}@portal-pqr.invalid>`,
@@ -195,11 +214,15 @@ Deno.serve(async request => {
   const due = new Date().toISOString();
   const stale = new Date(Date.now() - 10 * 60_000).toISOString();
   const [{ data: pending, error: pendingError }, { data: interrupted, error: interruptedError }] = await Promise.all([
-    db.from('pqr_mail_events').select('id,ticket_id,recipient_profile_id,recipient_email,event_type,status,locked_at,attempts').eq('status', 'pending').lte('next_attempt_at', due).order('created_at').limit(20),
-    db.from('pqr_mail_events').select('id,ticket_id,recipient_profile_id,recipient_email,event_type,status,locked_at,attempts').eq('status', 'sending').lt('locked_at', stale).order('locked_at').limit(5),
+    db.from('pqr_mail_events').select('id,ticket_id,recipient_profile_id,recipient_email,recipient_emails,cc_emails,replay_key,event_type,status,locked_at,attempts').eq('status', 'pending').lte('next_attempt_at', due).order('created_at').limit(10),
+    db.from('pqr_mail_events').select('id,ticket_id,recipient_profile_id,recipient_email,recipient_emails,cc_emails,replay_key,event_type,status,locked_at,attempts').eq('status', 'sending').lt('locked_at', stale).order('locked_at').limit(2),
   ]);
   if (pendingError || interruptedError) return Response.json({ error: pendingError?.message || interruptedError?.message }, { status: 500 });
   const results = [];
-  for (const event of [...(pending || []), ...(interrupted || [])] as MailEvent[]) results.push(await sendEvent(event));
+  const started = Date.now();
+  for (const event of [...(pending || []), ...(interrupted || [])] as MailEvent[]) {
+    if (Date.now() - started > 45_000) break;
+    results.push(await sendEvent(event));
+  }
   return Response.json({ processed: results.length, sent: results.filter(value => value === 'sent').length, failed: results.filter(value => value === 'failed').length });
 });

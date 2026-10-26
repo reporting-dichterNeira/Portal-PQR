@@ -1,5 +1,13 @@
 # Supabase · Portal PQR
 
+## Correos internos agrupados (26/10/2026)
+
+`20261026145124_internal_grouped_mail.sql` conserva la cola y su historial. Cada alta interna genera un único evento operativo con `recipient_emails` (equipo en CCO) y `cc_emails` (seguimiento visible), más un acuse individual sin copias. PQR conserva su ruta de Analistas; RDG/EDC y solicitudes posteriores de redigitación conservan la ruta de Validación. Los cierres avisan solo al solicitante. Clientes y casos eliminados no generan envíos. Las direcciones de seguimiento se configuran por DBA en `pqr_private.internal_mail_copies`, sin acceso desde frontend ni lectura directa del mailer.
+
+Publicación segura: pausar `pqr-mailer-every-minute` con `cron.alter_job`, comprobar que no haya eventos `sending`, aplicar la migración, configurar la copia privada y desplegar `pqr-mailer` con su autenticación privada existente. Ejecutar `supabase/tests/internal_grouped_mail.sql` e `internal_mail_routing.sql` (ambas revierten todos los registros de prueba) y reactivar Cron. No cambiar secretos, JWT ni RLS del portal. La función mantiene TLS validado y envía una sola transacción SMTP/DATA para todo el equipo. Rechazar cualquier destinatario antes de DATA permite reintentar sin entrega parcial. El lote se limita a diez eventos nuevos y dos recuperados por ejecución, con presupuesto de tiempo.
+
+Los reenvíos históricos requieren una operación explícita e idempotente: una `replay_key` identifica cada campaña; el índice único evita crear dos eventos del mismo ticket/tipo/campaña. No se reinician eventos enviados ni se crean tickets. El asunto lleva `[Reenvío]`. La aceptación SMTP confirma envío al proveedor, no entrega a la bandeja: Microsoft 365 aún puede retener el correo en cuarentena. Una interrupción después de aceptación SMTP y antes de registrar `sent` conserva la limitación habitual de entrega al menos una vez.
+
 ## Ticketera interna (19/10/2026)
 
 La migración `20261019133611_internal_ticketing.sql` añade recepción abierta PQR/RDG/EDC y consulta mínima de estado mediante RPC invoker, con núcleo restringido en `pqr_private`. No concede SELECT anónimo de tickets, perfiles, históricos o archivos ni altera filas existentes. Los casos sin `scope` siguen siendo de clientes; los nuevos internos llevan `scope=internal` y un radicado `TIPO-INT-AÑO-SECUENCIA-SUFIJO_ALEATORIO`. El radicado completo permite ver únicamente tipo, estado y fechas; debe conservarse y compartirse solo con quienes requieran seguimiento.

@@ -30,7 +30,8 @@ begin
   execute 'reset role';
   v_ticket:=(receipt->>'id')::uuid;
   select array_agg(email order by email) into expected from pqr_private.internal_mail_routes where route_key=case when k='PQR' then 'pqr' else 'redigit' end;
-  assert (select array_agg(e.recipient_email order by e.recipient_email) from public.pqr_mail_events e
+  assert (select array_agg(a.email order by a.email) from public.pqr_mail_events e
+   cross join lateral unnest(coalesce(e.recipient_emails,array[e.recipient_email])) a(email)
    where e.ticket_id=v_ticket and e.event_type=case when k='PQR' then 'new_pqr' else 'new_redigit' end)=expected;
   assert (select count(*) from public.pqr_mail_events e where e.ticket_id=v_ticket and event_type='received' and recipient_email='qa@example.invalid')=1;
   assert not exists(select 1 from public.pqr_mail_events e where e.ticket_id=v_ticket and recipient_profile_id is not null);
