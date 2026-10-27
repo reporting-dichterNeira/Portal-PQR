@@ -384,7 +384,7 @@
   }
   function dashboard() {
     if(window.PQRNavigation.homeRoute(location.hash)||['#solicitud-interna','#consultar-ticket'].includes(location.hash))return;
-    $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup, currentUserId: state.me.id });
+    $('#view').innerHTML = PQRReports.render(managerTickets(), state.users, state.staff, { ...managerState, auditLookup, currentUserId: state.me.id, scope: workspace });
     $('#view h1').textContent=`Dashboard · ${window.PQRScopes.label(workspace)}`;
     $('#view .manager-title .sub').textContent=workspace==='internal'?'Indicadores exclusivos de solicitudes internas, sin mezclar casos de clientes.':'Indicadores de clientes e históricos. No incluye solicitudes internas.';
     if (canCreateManualPqr()) $('.export-actions')?.insertAdjacentHTML('afterbegin', manualPqrButtons());
