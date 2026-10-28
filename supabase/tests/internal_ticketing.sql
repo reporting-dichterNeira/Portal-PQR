@@ -41,8 +41,8 @@ begin
   result:=public.pqr_submit_internal(request,payload||'{"description":"Cambio después del envío"}');assert result ? 'error';
   lookup:=public.pqr_lookup_internal(' '||lower(receipt->>'code')||' ');
   assert lookup->>'code'=receipt->>'code';
-  assert (select count(*) from jsonb_object_keys(lookup))=6;
-  assert not (lookup ?| array['requesterName','requesterEmail','description','timeline','uploadPaths','id']);
+  assert (select count(*) from jsonb_object_keys(lookup))=9;
+  assert not (lookup ?| array['requesterEmail','timeline','uploadPaths','id','response']);
   assert public.pqr_lookup_internal('PQR-2026-0019') is null;
   assert public.pqr_lookup_internal(left(receipt->>'code',length(receipt->>'code')-1)) is null;
   path:=receipt->'uploadPaths'->>0;

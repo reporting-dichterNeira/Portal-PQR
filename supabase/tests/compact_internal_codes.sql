@@ -27,7 +27,7 @@ begin
   perform set_config('request.headers',jsonb_build_object('x-forwarded-for',gen_random_uuid()::text)::text,true);
   execute 'set local role anon';
   lookup:=public.pqr_lookup_internal(' '||lower(legacy)||' ');
-  assert lookup->>'code'=code and (select count(*) from jsonb_object_keys(lookup))=6;
+  assert lookup->>'code'=code and (select count(*) from jsonb_object_keys(lookup))=9;
   assert public.pqr_lookup_internal(code)=lookup;
   assert public.pqr_lookup_internal(left(code,length(code)-1)) is null;
   execute 'reset role';

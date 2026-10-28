@@ -53,9 +53,10 @@ test('menú inicial ofrece dos accesos: ticketera abierta y gestión con cuenta'
  assert.doesNotMatch(html,/<form|type="password"/);
  assert.match(nav.loginInfo('internal'),/Volver al menú principal/);
 });
-test('consulta usa solo seguimiento y envío usa UUID idempotente, sin simulador ni claves privadas',()=>{
+test('consulta muestra datos de la solicitud sin notas privadas y envío usa UUID idempotente',()=>{
  const lookup=app.slice(app.indexOf('  function renderPublicLookup()'),app.indexOf('  function renderPublicInternal()'));
- assert.match(lookup,/internalAPI.lookup\(code\)/);assert.doesNotMatch(lookup,/t\.(?:requesterName|requesterEmail|description|timeline|uploadPaths|response)/);
+ assert.match(lookup,/internalAPI.lookup\(code\)/);assert.doesNotMatch(lookup,/t\.(?:requesterEmail|timeline|uploadPaths|response)/);
+ for(const field of ['pdv','requesterName','description'])assert.ok(lookup.includes('t.'+field));
  assert.match(lookup,/No encontramos un ticket interno/);assert.match(lookup,/role="status" aria-live="polite"/);
  assert.match(app,/requestId=crypto.randomUUID\(\)/);assert.match(app,/internalAPI.submit\(requestId,payload\)/);
  assert.match(app,/payload.files=files.map/);assert.ok(app.includes("db.rpc('pqr_create_manual',"));
