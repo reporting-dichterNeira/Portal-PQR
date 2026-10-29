@@ -661,6 +661,41 @@
     if(all){const group=boxes.slice(0,window.PQRAnalystBatch.MAX);all.checked=group.length>0&&group.every(b=>b.checked);all.indeterminate=analystSelection.size>0&&!all.checked;}
     document.querySelectorAll('[data-action="batch-assign"],[data-action="batch-dictate"]').forEach(b=>{b.disabled=!analystSelection.size;});
   }
+  function bindBatchSuggestions(form,tickets) {
+    let suggestions=new Map(),loading=false;
+    const refresh=form.querySelector('#refresh-batch-suggestions'),confirmAll=form.querySelector('#confirm-batch-suggestions'),status=form.querySelector('#batch-suggestion-status');
+    const rows=()=>Array.from(form.querySelectorAll('[data-batch-row]'));
+    const accept=(row,onlyEmpty)=>{
+      const ticket=tickets.find(t=>t.id===row.dataset.batchRow),input=row.querySelector('[name="auditOriginal"]');
+      const value=window.PQRAnalystBatch.suggestionValue(ticket,suggestions.get(ticket.id),input.value,row.querySelector('[name="pdv"]')?.value??ticket.pdv,onlyEmpty);
+      if(value===null)return false;
+      input.value=value;
+      const button=row.querySelector('[data-confirm-suggestion]');if(button)button.textContent='Sugerencia confirmada';
+      return true;
+    };
+    confirmAll.onclick=()=>{if(loading||analystBatchBusy)return;const n=rows().filter(row=>accept(row,true)).length;status.textContent=`${n} sugerencias confirmadas. Se conservaron los ID que ya estaban escritos. Puedes editar cualquier ID antes de dictaminar.`;};
+    form.addEventListener('click',event=>{
+      const button=event.target.closest('[data-confirm-suggestion]');if(!button||loading||analystBatchBusy)return;
+      const row=button.closest('[data-batch-row]');
+      if(accept(row,false))status.textContent='Sugerencia confirmada en el campo. El ticket se guardará al confirmar el dictamen.';
+      else status.textContent='El PDV cambió o la sugerencia no está disponible. Revisa el ID manualmente.';
+    });
+    const loadSuggestions=async()=>{
+      if(loading||analystBatchBusy)return;loading=true;refresh.disabled=true;confirmAll.disabled=true;
+      status.textContent='Consultando el último corte de Databricks…';
+      try{
+        const {data,error}=await db.rpc('pqr_suggest_audits',{p_ticket_ids:tickets.map(t=>t.id)});if(error)throw error;
+        if(!form.isConnected)return;
+        suggestions=new Map((data||[]).map(s=>[s.ticketId,s]));let found=0;
+        rows().forEach(row=>{const s=suggestions.get(row.dataset.batchRow);row.querySelector('[data-audit-suggestion]').innerHTML=window.PQRAnalystBatch.suggestionHtml(s,fmt);if(s?.status==='found')found++;});
+        confirmAll.disabled=!found;
+        status.textContent=`${found} sugerencias disponibles. Confirma las que correspondan. «Confirmar todas» completa solo campos vacíos.`;
+      }catch{
+        if(form.isConnected){suggestions.clear();rows().forEach(row=>{row.querySelector('[data-audit-suggestion]').innerHTML=window.PQRAnalystBatch.suggestionHtml(null);});status.textContent='No se pudieron cargar las sugerencias. Puedes reintentar o escribir los ID manualmente.';}
+      }finally{loading=false;if(form.isConnected)refresh.disabled=false;}
+    };
+    refresh.onclick=loadSuggestions;loadSuggestions();
+  }
   function analystBatchForm(operation) {
     if(state.me?.role!=='validador'||analystBatchBusy)return;
     const tickets=scopeTickets().filter(t=>analystSelection.has(t.id));
@@ -670,14 +705,15 @@
     const person=current.size===1?tickets[0].validatorPersonId:'';
     const dictateAll=operation==='dictate';
     const areas=[...new Set([combinedArea,...standardAreas,...Object.values(state.tipAreas).filter(Boolean)])];
-    const rows=tickets.map(t=>`<tr data-batch-row="${esc(t.id)}"><td><strong>${esc(t.code)}</strong><small>PDV: ${esc(t.pdv||'Sin PDV')} · ${esc(t.client)} · ${esc(t.country)}</small><details><summary>Ver solicitud</summary><p>${esc(t.description||'Sin descripción registrada')}</p></details></td>${dictateAll?`<td><label>ID de auditoría<input name="auditOriginal" aria-label="ID de auditoría · ${esc(t.code)}" inputmode="numeric" data-numeric pattern="[0-9]{1,80}" required maxlength="80" value="${esc(t.auditOriginal||'')}"></label>${t.manualEntry?`<label>ID de PDV<input name="pdv" aria-label="ID de PDV · ${esc(t.code)}" inputmode="numeric" data-numeric pattern="[0-9]{1,80}" required maxlength="80" value="${esc(t.pdv||'')}"></label><label>Descripción de la solicitud<textarea name="description" aria-label="Descripción · ${esc(t.code)}" required minlength="8" maxlength="12000">${esc(t.description||'')}</textarea></label>`:''}</td>`:''}</tr>`).join('');
-    modal(`${dictateAll?'Asignar y dictaminar':'Asignar'} · ${tickets.length} PQR`,`<form id="analyst-batch-form" class="form-grid"><p class="full sub">${dictateAll?'El analista, resultado, tipología, área y respuesta se aplicarán a todas las PQR seleccionadas. Cada PQR conserva sus datos y su flujo individual.':'Todas las PQR seleccionadas se asignarán al mismo analista.'}</p><label class="full">Analista de PQR<select name="personId" required><option value="">Selecciona un analista</option>${people.map(p=>`<option value="${esc(p.id)}" ${p.id===person?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>${dictateAll?`<label class="full">Resultado para todas<select name="decision" required><option value="">Selecciona el resultado</option><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips,'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options([...areas,'Otra área'],'Selecciona un área')}</select><small id="batch-area-suggestion" role="status"></small></label><label class="full hide" id="batch-other-area">Otra área<input name="areaOther" maxlength="100"></label><label class="full">Justificación o respuesta para todas<textarea name="response" required minlength="5" maxlength="12000" placeholder="Escribe una sola respuesta para las PQR seleccionadas"></textarea></label>`:''}<div class="full"><h3>${dictateAll?'Revisar datos de cada PQR':'PQR seleccionadas'}</h3>${dictateAll?'<p class="sub">El ID de auditoría es individual. Completa los faltantes antes de confirmar.</p>':''}<div class="batch-review table-wrap"><table class="table"><thead><tr><th>Solicitud</th>${dictateAll?'<th>Datos individuales</th>':''}</tr></thead><tbody>${rows}</tbody></table></div></div><p class="full batch-error" id="analyst-batch-error" role="alert"></p><div class="full actions"><button class="primary" type="submit">${dictateAll?'Confirmar asignación y dictamen':'Confirmar asignación'} de ${tickets.length} PQR</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
+    const rows=tickets.map(t=>`<tr data-batch-row="${esc(t.id)}"><td><strong>${esc(t.code)}</strong><small>PDV: ${esc(t.pdv||'Sin PDV')} · ${esc(t.client)} · ${esc(t.country)}</small><details><summary>Ver solicitud</summary><p>${esc(t.description||'Sin descripción registrada')}</p></details></td>${dictateAll?`<td><label>ID de auditoría<input name="auditOriginal" aria-label="ID de auditoría · ${esc(t.code)}" inputmode="numeric" data-numeric pattern="[0-9]{1,80}" required maxlength="80" value="${esc(t.auditOriginal||'')}"></label><div class="audit-suggestion" data-audit-suggestion="${esc(t.id)}" aria-live="polite">Buscando sugerencia…</div>${t.manualEntry?`<label>ID de PDV<input name="pdv" aria-label="ID de PDV · ${esc(t.code)}" inputmode="numeric" data-numeric pattern="[0-9]{1,80}" required maxlength="80" value="${esc(t.pdv||'')}"></label><label>Descripción de la solicitud<textarea name="description" aria-label="Descripción · ${esc(t.code)}" required minlength="8" maxlength="12000">${esc(t.description||'')}</textarea></label>`:''}</td>`:''}</tr>`).join('');
+    modal(`${dictateAll?'Asignar y dictaminar':'Asignar'} · ${tickets.length} PQR`,`<form id="analyst-batch-form" class="form-grid"><p class="full sub">${dictateAll?'El analista, resultado, tipología, área y respuesta se aplicarán a todas las PQR seleccionadas. Cada PQR conserva sus datos y su flujo individual.':'Todas las PQR seleccionadas se asignarán al mismo analista.'}</p><label class="full">Analista de PQR<select name="personId" required><option value="">Selecciona un analista</option>${people.map(p=>`<option value="${esc(p.id)}" ${p.id===person?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>${dictateAll?`<label class="full">Resultado para todas<select name="decision" required><option value="">Selecciona el resultado</option><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips,'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options([...areas,'Otra área'],'Selecciona un área')}</select><small id="batch-area-suggestion" role="status"></small></label><label class="full hide" id="batch-other-area">Otra área<input name="areaOther" maxlength="100"></label><label class="full">Justificación o respuesta para todas<textarea name="response" required minlength="5" maxlength="12000" placeholder="Escribe una sola respuesta para las PQR seleccionadas"></textarea></label>`:''}<div class="full"><h3>${dictateAll?'Revisar datos de cada PQR':'PQR seleccionadas'}</h3>${dictateAll?'<p class="sub">Auditoría más reciente por PDV, estudio y país en los últimos 60 días. Revisa las sugerencias antes de usarlas; el ID sigue editable.</p><div class="actions suggestion-actions"><button type="button" class="ghost" id="refresh-batch-suggestions">Actualizar sugerencias</button><button type="button" class="secondary" id="confirm-batch-suggestions" disabled>Confirmar todas las sugerencias</button></div><p class="sub" id="batch-suggestion-status" role="status">Confirmar todas solo completa campos vacíos; conserva los ID que ya escribiste.</p>':''}<div class="batch-review table-wrap"><table class="table"><thead><tr><th>Solicitud</th>${dictateAll?'<th>Datos individuales</th>':''}</tr></thead><tbody>${rows}</tbody></table></div></div><p class="full batch-error" id="analyst-batch-error" role="alert"></p><div class="full actions"><button class="primary" type="submit">${dictateAll?'Confirmar asignación y dictamen':'Confirmar asignación'} de ${tickets.length} PQR</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
     $('#modal .modal-box').classList.add('batch-modal-box');
     const form=$('#analyst-batch-form');
     if(dictateAll){
       const toggle=()=>{const other=form.elements.area.value==='Otra área';$('#batch-other-area').classList.toggle('hide',!other);form.elements.areaOther.required=other;};
       form.elements.tipology.onchange=()=>{const area=state.tipAreas[form.elements.tipology.value];form.elements.area.value=area||'';$('#batch-area-suggestion').textContent=area?`Área sugerida: ${area}. Puedes cambiarla.`:'Selecciona el área responsable.';toggle();};
       form.elements.area.onchange=toggle;
+      bindBatchSuggestions(form,tickets);
     }
     form.onsubmit=async event=>{
       event.preventDefault();if(analystBatchBusy||!form.reportValidity())return;

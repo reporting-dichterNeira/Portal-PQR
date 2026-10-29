@@ -33,9 +33,23 @@ Deno.serve(async request=>{
     if(text.length>1500000)return reply({error:'PAYLOAD_TOO_LARGE'},413);
     input=JSON.parse(text);
   } catch {return reply({error:'INVALID_JSON'},400);}
-  if(!['manifest','publish'].includes(input?.action))return reply({error:'INVALID_ACTION'},400);
+  if(!['manifest','publish','pdv_manifest','pdv_publish'].includes(input?.action))return reply({error:'INVALID_ACTION'},400);
   try {
     const admin=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false,autoRefreshToken:false}});
+    if(input.action==='pdv_manifest'){
+      const after=input.after||'';
+      if(typeof after!=='string'||(after&&!/^[a-f0-9]{32}$/.test(after)))return reply({error:'INVALID_CURSOR'},400);
+      const {data,error}=await admin.rpc('pqr_databricks_pdv_targets',{p_after:after});
+      if(error)throw Error('PDV_TARGETS_FAILED');
+      const targets=data||[];
+      return reply({targets,next:targets.length===100?targets.at(-1).target_key:null});
+    }
+    if(input.action==='pdv_publish'){
+      if(!uuid.test(input.runId||'')||!Array.isArray(input.entries)||input.entries.length<1||input.entries.length>100)return reply({error:'INVALID_PDV_BATCH'},400);
+      const {data,error}=await admin.rpc('pqr_publish_pdv_suggestions',{p_entries:input.entries,p_run_id:input.runId});
+      if(error)throw Error('PDV_PUBLISH_FAILED');
+      return reply({ok:true,count:data});
+    }
     if(input.action==='manifest'){
       const after=input.after||'';
       if(typeof after!=='string'||(after&&!idPattern.test(after)))return reply({error:'INVALID_CURSOR'},400);

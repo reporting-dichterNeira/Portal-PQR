@@ -10,14 +10,14 @@ const fields=['ID_de_audito','ID_de_PDV','Ola','pais','segmento','canal','Fecha_
 const row=Object.fromEntries(fields.map(f=>[f,null]));
 Object.assign(row,{ID_de_audito:'123',Ola:'OCT 2026',Survey:'ko_trad',pais:'Perú'});
 function receiver({allowed=['123','456'],writeError=false}={}){
-  let handler;const writes=[];
-  const client={rpc:async(_name,args)=>({data:allowed.filter(id=>!args.p_ids||args.p_ids.includes(id)).map(audit_id=>({audit_id}))}),
+  let handler;const writes=[],calls=[];
+  const client={rpc:async(_name,args)=>{calls.push({name:_name,args});return _name==='pqr_databricks_pdv_targets'?{data:[{target_key:'a'.repeat(32),pdv:'123',country:'honduras',study:'ko tradicional'}]}:_name==='pqr_publish_pdv_suggestions'?{data:args.p_entries.length,error:writeError?{}:null}:{data:allowed.filter(id=>!args.p_ids||args.p_ids.includes(id)).map(audit_id=>({audit_id}))};},
     from:()=>({upsert:async rows=>{writes.push(rows);return {error:writeError?{}:null};}})};
   let code=fs.readFileSync('supabase/functions/pqr-audit-sync/index.ts','utf8').replace(/^import .*;\r?\n/gm,'');
   code=code.replace(/const ingestTokenHash = '[^']+';/,`const ingestTokenHash = '${createHash('sha256').update(key).digest('hex')}';`);
   const context=vm.createContext({Response,Request,TextEncoder,crypto:webcrypto,console,createClient:()=>client,Deno:{env:{get:()=>''},serve:fn=>{handler=fn;}}});
   vm.runInContext(stripTypeScriptTypes(code),context);
-  return {writes,invoke:(body,secret=key)=>handler(new Request('https://example.test',{method:'POST',headers:{'x-pqr-sync-token':secret},body:JSON.stringify(body)}))};
+  return {writes,calls,invoke:(body,secret=key)=>handler(new Request('https://example.test',{method:'POST',headers:{'x-pqr-sync-token':secret},body:JSON.stringify(body)}))};
 }
 const batch=(rows=[row],auditId='123')=>({action:'publish',runId,entries:[{auditId,rows}]});
 test('receptor exige clave exclusiva; manifiesto solo IDs, nunca SQL o tickets',async()=>{
@@ -49,4 +49,14 @@ test('programación independiente 6 y 14 Bogotá, solo Reporting Cluster',()=>{
   assert.equal(job.tasks[0].existing_cluster_id,'1115-192254-jqnbpmi');assert.equal(job.max_concurrent_runs,1);
   const reader=fs.readFileSync('supabase/functions/pqr-audits/index.ts','utf8');
   assert.ok(!reader.includes('DATABRICKS_TOKEN'));assert.ok(!reader.includes('queryCluster'));
+});
+test('PDV routes reuse exclusive authentication and delegate target/source validation to service-only SQL',async()=>{
+ const r=receiver();assert.equal((await r.invoke({action:'pdv_manifest'},'')).status,401);
+ assert.equal((await r.invoke({action:'pdv_manifest',after:'bad'})).status,400);
+ const manifest=await (await r.invoke({action:'pdv_manifest'})).json();assert.equal(manifest.targets[0].pdv,'123');
+ const entries=[{key:'a'.repeat(32),pdv:'123',country:'honduras',study:'ko tradicional',auditId:null}];
+ assert.equal((await r.invoke({action:'pdv_publish',runId,entries})).status,200);
+ assert.equal(r.calls.at(-1).name,'pqr_publish_pdv_suggestions');assert.equal(r.calls.at(-1).args.p_entries.length,1);
+ assert.equal(r.writes.length,0);assert.equal((await r.invoke({action:'pdv_publish',runId,entries:[]})).status,400);
+ assert.equal((await receiver({writeError:true}).invoke({action:'pdv_publish',runId,entries})).status,500);
 });

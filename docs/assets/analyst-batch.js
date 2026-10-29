@@ -34,5 +34,17 @@
     });
     return {p_operation:operation,p_items:items,p_data:data};
   }
-  window.PQRAnalystBatch={MAX,eligible,prepare};
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function suggestionHtml(s,formatDate=v=>v||'Sin corte') {
+    if(s?.status==='found'&&/^\d{1,30}$/.test(s.auditId||''))return `<strong>ID sugerido: ${esc(s.auditId)}</strong><small>Databricks · Auditoría: ${esc(s.auditDate)}${s.ola?` · Ola: ${esc(s.ola)}`:''}</small><small>Corte: ${esc(formatDate(s.checkedAt))} · Últimos 60 días</small><button type="button" class="secondary" data-confirm-suggestion="${esc(s.ticketId)}">Confirmar sugerencia</button>`;
+    const messages={pending:'Este PDV aún no tiene corte. Se actualiza a las 6:00 a. m. y 2:00 p. m. de Bogotá.',not_found:'Sin coincidencia por PDV, estudio y país en los últimos 60 días.',missing_pdv:'No hay un PDV registrado válido para buscar la sugerencia.',unsupported:'Sin búsqueda Databricks para este estudio y país.',expired:'El dato del corte ya quedó fuera de los últimos 60 días.'};
+    return `<small>${esc(messages[s?.status]||'No se pudo consultar la sugerencia. Puedes reintentar.')} Puedes escribir el ID manualmente.</small>`;
+  }
+  function suggestionValue(ticket,s,currentAudit,currentPdv,onlyEmpty=false) {
+    if(s?.status!=='found'||s.ticketId!==ticket.id||!/^\d{1,30}$/.test(s.auditId||''))return null;
+    if(String(currentPdv??ticket.pdv??'').trim()!==s.pdv)return null;
+    if(onlyEmpty&&String(currentAudit||'').trim())return null;
+    return s.auditId;
+  }
+  window.PQRAnalystBatch={MAX,eligible,prepare,suggestionHtml,suggestionValue};
 })();
