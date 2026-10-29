@@ -45,11 +45,14 @@
   const manualPqrRoles = ['validador', 'gerente'];
   const canCreateManualPqr = () => workspace === 'external' && manualPqrRoles.includes(state.me?.role);
   const manualPqrButtons = () => canCreateManualPqr() ? '<button class="primary" data-action="new-manual-pqr">Nueva PQR manual</button><button class="secondary" data-action="new-batch-pqr">Añadir varias PQR</button>' : '';
+  const canCreateAnalystRedigitation = () => state.me?.role === 'validador';
+  const analystRedigitationButton = () => canCreateAnalystRedigitation() ? '<button class="secondary" data-action="new-analyst-redigitation">Enviar a Redigitación</button>' : '';
   const canEditManualPqr = ticket => ticket?.manualEntry === true && requestType(ticket) === 'PQR' && !ticket.deletedAt &&
     (state.me?.role === 'validador' || (state.me?.role === 'gerente' && ticket.createdBy === state.me.id));
   const canAddAttachments = ticket => !ticket.deletedAt && (
     (state.me.role === 'comercial' && ticket.commercial === state.me.id) ||
-    (canCreateManualPqr() && ticket.manualEntry === true && ticket.createdBy === state.me.id)
+    (canCreateManualPqr() && ticket.manualEntry === true && ticket.createdBy === state.me.id) ||
+    (canCreateAnalystRedigitation() && ticket.analystDirect === true && ticket.createdBy === state.me.id)
   );
   let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], historical: [], overrides: [], deleted: [], notifications: [] };
   let busy = false;
@@ -231,6 +234,12 @@
     if (error) throw error;
     return data;
   }
+  async function createAnalystRedigitation(payload) {
+    if (!canCreateAnalystRedigitation()) throw new Error('Solo Analistas de PQR pueden enviar esta solicitud.');
+    const { data, error } = await db.rpc('pqr_create_analyst_redigitation', { p_data: payload });
+    if (error) throw error;
+    return data;
+  }
   async function createManualPqr(payload) {
     if (!canCreateManualPqr() || payload.scope === 'internal') throw new Error('La radicación manual solo está disponible en PQR de clientes.');
     const { data, error } = await db.rpc('pqr_create_manual', { p_data: { ...payload, scope: 'external' } });
@@ -377,7 +386,7 @@
     const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
     const cases = PQRReports.filterTickets(all, analystFilters);
     if(!cases.length)analystSelection.clear();
-    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons() + analystRedigitationButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
     $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
     $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
     if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
@@ -545,12 +554,12 @@
     };
   }
   function options(values, placeholder = 'Selecciona una opción') { return `<option value="" disabled selected>${placeholder}</option>${values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`; }
-  function newTicket(kind, manual = false) {
-    if (manual ? !canCreateManualPqr() || kind !== 'PQR' : state.me.role !== 'comercial') return;
+  function newTicket(kind, manual = false, analystDirect = false) {
+    if (analystDirect ? !canCreateAnalystRedigitation() || kind !== 'RDG' || manual : manual ? !canCreateManualPqr() || kind !== 'PQR' : state.me.role !== 'comercial') return;
     const direct = kind === 'RDG';
     const edition = kind === 'EDC';
-    const manualFields = manual ? `<p class="full sub">Radicación rápida de una solicitud recibida fuera del portal. El ID de PDV y la descripción son opcionales ahora; el analista deberá completarlos antes de confirmar el dictamen. El portal genera su propio radicado PQR.</p><label>ID de ticket (opcional)<input name="externalTicketId" placeholder="ID del ticket recibido fuera del portal" maxlength="100"></label>` : '';
-    modal(manual ? 'Nueva PQR manual' : edition ? 'Solicitar edición de auditoría' : direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid">${manualFields}${edition ? '' : `<label>ID de PDV${manual?' (opcional)':''}<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric ${manual?'':'required '}maxlength="80"></label>`}<label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct || edition ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">${edition ? 'Motivo de la edición' : `Descripción${manual?' (opcional)':''}`}<textarea name="description" ${manual?'':'required minlength="8" '}maxlength="12000"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${edition ? 'Solicitar edición' : direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
+    const manualFields = manual ? `<p class="full sub">Radicación rápida de una solicitud recibida fuera del portal. El ID de PDV y la descripción son opcionales ahora; el analista deberá completarlos antes de confirmar el dictamen. El portal genera su propio radicado PQR.</p><label>ID de ticket (opcional)<input name="externalTicketId" placeholder="ID del ticket recibido fuera del portal" maxlength="100"></label>` : analystDirect ? `<p class="full sub">Se enviará directamente al equipo de Redigitación en ${workspace === 'internal' ? 'PQR internas' : 'PQR de clientes'}, sin dictamen previo de Analistas. El equipo cerrará la solicitud al registrar la nueva auditoría.</p>` : '';
+    modal(manual ? 'Nueva PQR manual' : edition ? 'Solicitar edición de auditoría' : direct ? 'Redigitación directa' : 'Nueva PQR', `<form id="case-form" class="form-grid">${manualFields}${edition ? '' : `<label>ID de PDV${manual?' (opcional)':''}<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric ${manual?'':'required '}maxlength="80"></label>`}<label>Cliente / estudio<select name="client" required>${options(clients)}</select></label><label class="full hide" id="other-client">¿Cuál otro?<input name="clientOther" maxlength="100"></label><label>País<select name="country" required>${options(countries)}</select></label>${direct || edition ? '<label>ID de auditoría actual<input name="auditOriginal" inputmode="numeric" pattern="[0-9]+" data-numeric required></label>' : ''}<label class="full">${edition ? 'Motivo de la edición' : direct ? 'Motivo de la redigitación' : `Descripción${manual?' (opcional)':''}`}<textarea name="description" ${manual?'':'required minlength="8" '}maxlength="12000"></textarea></label>${attachmentField()}<p class="full attachment-progress" id="upload-progress" role="status" aria-live="polite"></p><div class="full actions"><button class="primary">${edition ? 'Solicitar edición' : direct ? 'Enviar a Redigitación' : 'Radicar PQR'}</button><button type="button" class="ghost" data-action="close">Cancelar</button></div></form>`);
     const form = $('#case-form');
     bindAttachmentSelection(form);
     form.elements.client.onchange = () => { const other = form.elements.client.value === 'Otros'; $('#other-client').classList.toggle('hide', !other); form.elements.clientOther.required = other; };
@@ -567,10 +576,11 @@
         delete payload.attachments;
         delete payload.clientOther;
         payload.client = form.elements.client.value === 'Otros' ? form.elements.clientOther.value.trim() : form.elements.client.value;
-        created = manual ? await createManualPqr(payload) : kind === 'PQR' ? await action('create', null, payload) : await createSpecial(kind, payload);
+        created = analystDirect ? await createAnalystRedigitation(payload) : manual ? await createManualPqr(payload) : kind === 'PQR' ? await action('create', null, payload) : await createSpecial(kind, payload);
         failures = await uploadAttachments(created, files, $('#upload-progress'));
       });
       if (created && failures.length) alert(`${created.code} se creó correctamente, pero no se pudieron cargar estos adjuntos: ${failures.join(', ')}. Abre Detalle para reintentarlo.`);
+      else if (created && analystDirect) alert(`${created.code} enviado al equipo de Redigitación. Estado: Pendiente de Redigitación.`);
     };
   }
   function editManualPqr(ticket) {
@@ -933,6 +943,7 @@
       if (type === 'download-attachment' && ticket && button.dataset.file) return await downloadAttachment(ticket.id, button.dataset.file);
       if (type === 'new-ticket' || type === 'new-direct' || type === 'new-edit') return newTicket(type === 'new-ticket' ? 'PQR' : type === 'new-direct' ? 'RDG' : 'EDC');
       if (type === 'new-manual-pqr' && canCreateManualPqr()) return newTicket('PQR', true);
+      if (type === 'new-analyst-redigitation' && canCreateAnalystRedigitation()) return newTicket('RDG', false, true);
       if (type === 'new-batch-pqr' && canCreateManualPqr()) return newBatchPqr();
       if (type === 'assign-validator' && ticket) return assignValidator(ticket);
       if (type === 'dictate' && ticket) return dictate(ticket);
