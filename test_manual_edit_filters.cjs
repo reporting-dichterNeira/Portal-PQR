@@ -7,7 +7,7 @@ function harness(role='validador'){
  const dialogs=[],calls=[],metrics=[],tables=[];
  const form={elements:{client:{},clientOther:{}}},view={innerHTML:'',filters:'',querySelector(){return{insertAdjacentHTML:(_,html)=>view.filters=html}}};
  const state={me:{id:'creator',role},tickets:[fixture,{...fixture,id:'other',client:'Lindley',country:'Perú',createdAt:'2026-09-01',status:'Cerrado',validatorPersonId:'v1'}],staff:{validators:[{id:'v1',name:'Ana'}],redigitators:[]}};
- const c=vm.createContext({window:{PQRScopes:{label:()=> 'PQR de clientes'}},workspace:'external',scopeTickets:()=>state.tickets,state,esc,clients:['KO moderno','KO tradicional','Lindley','Otros'],countries:['Chile','Perú'],
+ const c=vm.createContext({analystSelection:new Set(),window:{PQRScopes:{label:()=> 'PQR de clientes'}},workspace:'external',scopeTickets:()=>state.tickets,state,esc,clients:['KO moderno','KO tradicional','Lindley','Otros'],countries:['Chile','Perú'],
   analystFilters:{country:'all',study:'all',month:'all',origin:'all',type:'all',status:'all',analyst:'all'},
   requestType:t=>t.requestType||'PQR',staffName:(_,id)=>id==='v1'?'Ana':'',
   $:sel=>sel==='#edit-manual-form'?form:sel==='#view'?view:sel==='#view h1'?{}:null,

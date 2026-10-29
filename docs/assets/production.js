@@ -38,6 +38,8 @@
   const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
   const analystFilters = { country: 'all', study: 'all', month: 'all', origin: 'all', type: 'all', status: 'all', analyst: 'all' };
+  const analystSelection = new Set();
+  let analystBatchBusy = false;
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
   const requestLabels = { PQR: 'PQR', RDG: 'Redigitación', EDC: 'Edición' };
   const manualPqrRoles = ['validador', 'gerente'];
@@ -349,7 +351,9 @@
     const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
     const filter = role === 'validador' ? '' : `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
-    return `${filter}<section class="card table-wrap"><table class="table ticket-table"><thead><tr><th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 48 h (lun–vie)</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr><td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
+    const multiple=role==='validador';
+    const tools=multiple?analystBatchTools(visible):'';
+    return `${filter}${tools}<section class="card table-wrap"><table class="table ticket-table"><thead><tr>${multiple?'<th class="batch-check-cell"><input type="checkbox" id="analyst-select-visible" aria-label="Seleccionar PQR visibles pendientes de dictamen"></th>':''}<th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 48 h (lun–vie)</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr>${multiple?`<td class="batch-check-cell"><input type="checkbox" data-batch-ticket="${esc(ticket.id)}" aria-label="Seleccionar ${esc(ticket.code)}" ${analystSelection.has(ticket.id)?'checked':''} ${window.PQRAnalystBatch.eligible(ticket)?'':'disabled title="Solo PQR pendientes de dictamen"'}></td>`:''}<td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
@@ -372,11 +376,13 @@
   function analyst() {
     const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
     const cases = PQRReports.filterTickets(all, analystFilters);
+    if(!cases.length)analystSelection.clear();
     $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
     $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
     $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
     if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
     for (const key of Object.keys(analystFilters)) $('#analyst-'+key+'-filter')?.addEventListener('change', event => { analystFilters[key] = event.target.value; analyst(); });
+    if(window.PQRAnalystBatch)updateAnalystSelection();
   }
   function redigitator() {
     const cases = scopeTickets().filter(ticket => ticket.redigitador === state.me.id);
@@ -642,6 +648,52 @@
     form.elements.personId.innerHTML = `<option value="" disabled selected>Selecciona un analista</option>${people.map(person => `<option value="${person.id}" ${ticket.validatorPersonId === person.id ? 'selected' : ''}>${esc(person.name)}</option>`).join('')}`;
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_validator', ticket.id, formData(form))); };
   }
+  function analystBatchTools(cases) {
+    const eligible=cases.filter(window.PQRAnalystBatch.eligible),visibleIds=new Set(eligible.map(t=>t.id));
+    for(const id of analystSelection)if(!visibleIds.has(id))analystSelection.delete(id);
+    return `<section class="card analyst-batch-toolbar" aria-label="Gestión múltiple de PQR"><div><strong id="analyst-selection-count" role="status">${analystSelection.size} PQR seleccionadas</strong><small>Marca las PQR que llevan la misma respuesta. Hasta 100 por operación; solo se seleccionan las visibles y pendientes de dictamen.</small></div><div class="actions"><button class="ghost" data-action="batch-clear">Limpiar selección</button><button class="secondary" data-action="batch-assign" ${analystSelection.size?'':'disabled'}>Asignar seleccionadas</button><button class="primary" data-action="batch-dictate" ${analystSelection.size?'':'disabled'}>Asignar y dictaminar</button></div></section>`;
+  }
+  function updateAnalystSelection() {
+    const boxes=Array.from(document.querySelectorAll('[data-batch-ticket]:not(:disabled)'));
+    boxes.forEach(box=>{box.checked=analystSelection.has(box.dataset.batchTicket);box.closest('tr').classList.toggle('batch-selected',box.checked);});
+    const count=$('#analyst-selection-count');if(count)count.textContent=`${analystSelection.size} PQR seleccionadas`;
+    const all=$('#analyst-select-visible');
+    if(all){all.checked=boxes.length>0&&boxes.every(b=>b.checked);all.indeterminate=analystSelection.size>0&&!all.checked;}
+    document.querySelectorAll('[data-action="batch-assign"],[data-action="batch-dictate"]').forEach(b=>{b.disabled=!analystSelection.size;});
+  }
+  function analystBatchForm(operation) {
+    if(state.me?.role!=='validador'||analystBatchBusy)return;
+    const tickets=scopeTickets().filter(t=>analystSelection.has(t.id));
+    if(!tickets.length)throw Error('Selecciona las PQR que quieres gestionar.');
+    if(tickets.some(t=>!window.PQRAnalystBatch.eligible(t)))throw Error('Actualiza la bandeja y revisa la selección.');
+    const people=state.staff.validators.filter(p=>p.active),current=new Set(tickets.map(t=>t.validatorPersonId));
+    const person=current.size===1?tickets[0].validatorPersonId:'';
+    const dictateAll=operation==='dictate';
+    const areas=[...new Set([combinedArea,...standardAreas,...Object.values(state.tipAreas).filter(Boolean)])];
+    const rows=tickets.map(t=>`<tr data-batch-row="${esc(t.id)}"><td><strong>${esc(t.code)}</strong><small>PDV: ${esc(t.pdv||'Sin PDV')} · ${esc(t.client)} · ${esc(t.country)}</small><details><summary>Ver solicitud</summary><p>${esc(t.description||'Sin descripción registrada')}</p></details></td>${dictateAll?`<td><label>ID de auditoría<input name="auditOriginal" aria-label="ID de auditoría · ${esc(t.code)}" inputmode="numeric" data-numeric pattern="[0-9]{1,80}" required maxlength="80" value="${esc(t.auditOriginal||'')}"></label>${t.manualEntry?`<label>ID de PDV<input name="pdv" aria-label="ID de PDV · ${esc(t.code)}" inputmode="numeric" data-numeric pattern="[0-9]{1,80}" required maxlength="80" value="${esc(t.pdv||'')}"></label><label>Descripción de la solicitud<textarea name="description" aria-label="Descripción · ${esc(t.code)}" required minlength="8" maxlength="12000">${esc(t.description||'')}</textarea></label>`:''}</td>`:''}</tr>`).join('');
+    modal(`${dictateAll?'Asignar y dictaminar':'Asignar'} · ${tickets.length} PQR`,`<form id="analyst-batch-form" class="form-grid"><p class="full sub">${dictateAll?'El analista, resultado, tipología, área y respuesta se aplicarán a todas las PQR seleccionadas. Cada PQR conserva sus datos y su flujo individual.':'Todas las PQR seleccionadas se asignarán al mismo analista.'}</p><label class="full">Analista de PQR<select name="personId" required><option value="">Selecciona un analista</option>${people.map(p=>`<option value="${esc(p.id)}" ${p.id===person?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>${dictateAll?`<label class="full">Resultado para todas<select name="decision" required><option value="">Selecciona el resultado</option><option value="no">No aplica · cerrar con justificación</option><option value="yes">Aplica · cerrar con respuesta</option><option value="redigit">Aplica · requiere redigitación</option></select></label><label>Tipología<select name="tipology" required>${options(state.tips,'Selecciona una tipología')}</select></label><label>Adjudicable a<select name="area" required>${options([...areas,'Otra área'],'Selecciona un área')}</select><small id="batch-area-suggestion" role="status"></small></label><label class="full hide" id="batch-other-area">Otra área<input name="areaOther" maxlength="100"></label><label class="full">Justificación o respuesta para todas<textarea name="response" required minlength="5" maxlength="12000" placeholder="Escribe una sola respuesta para las PQR seleccionadas"></textarea></label>`:''}<div class="full"><h3>${dictateAll?'Revisar datos de cada PQR':'PQR seleccionadas'}</h3>${dictateAll?'<p class="sub">El ID de auditoría es individual. Completa los faltantes antes de confirmar.</p>':''}<div class="batch-review table-wrap"><table class="table"><thead><tr><th>Solicitud</th>${dictateAll?'<th>Datos individuales</th>':''}</tr></thead><tbody>${rows}</tbody></table></div></div><p class="full batch-error" id="analyst-batch-error" role="alert"></p><div class="full actions"><button class="primary" type="submit">${dictateAll?'Confirmar asignación y dictamen':'Confirmar asignación'} de ${tickets.length} PQR</button><button class="ghost" type="button" data-action="close">Cancelar</button></div></form>`);
+    $('#modal .modal-box').classList.add('batch-modal-box');
+    const form=$('#analyst-batch-form');
+    if(dictateAll){
+      const toggle=()=>{const other=form.elements.area.value==='Otra área';$('#batch-other-area').classList.toggle('hide',!other);form.elements.areaOther.required=other;};
+      form.elements.tipology.onchange=()=>{const area=state.tipAreas[form.elements.tipology.value];form.elements.area.value=area||'';$('#batch-area-suggestion').textContent=area?`Área sugerida: ${area}. Puedes cambiarla.`:'Selecciona el área responsable.';toggle();};
+      form.elements.area.onchange=toggle;
+    }
+    form.onsubmit=async event=>{
+      event.preventDefault();if(analystBatchBusy||!form.reportValidity())return;
+      const errorBox=$('#analyst-batch-error');errorBox.textContent='';
+      try{
+        const edits={};form.querySelectorAll('[data-batch-row]').forEach(row=>{edits[row.dataset.batchRow]=Object.fromEntries(Array.from(row.querySelectorAll('input,textarea'),input=>[input.name,input.value]));});
+        const args=window.PQRAnalystBatch.prepare(tickets,operation,formData(form),edits);
+        analystBatchBusy=true;form.querySelectorAll('input,select,textarea,button').forEach(el=>{el.disabled=true;});
+        const {data,error}=await db.rpc('pqr_analyst_batch',args);if(error)throw error;
+        analystSelection.clear();analystBatchBusy=false;closeModal();await load();
+        modal('Gestión múltiple completada',`<p>${data.count} PQR ${dictateAll?'asignadas y dictaminadas':'asignadas'} correctamente.</p><p class="sub">Cada radicado conserva su seguimiento individual.</p><button class="primary" data-action="close">Aceptar</button>`);
+      }catch(error){
+        errorBox.textContent=`${error.message||'No se pudo confirmar la operación.'} Si se interrumpió la conexión, actualiza la bandeja antes de reintentar.`;
+      }finally{analystBatchBusy=false;if(form.isConnected)form.querySelectorAll('input,select,textarea,button').forEach(el=>{el.disabled=false;});}
+    };
+  }
   function dictate(ticket) {
     const areas = [...new Set([combinedArea, ...standardAreas, ...Object.values(state.tipAreas).filter(Boolean)])];
     const intakeFields=ticket.manualEntry?`<p class="full sub">${ticket.externalTicketId?`Ticket de origen: ${esc(ticket.externalTicketId)}. `:''}Completa la información de la radicación antes de dictaminar. Estos campos son obligatorios para cualquier resultado.</p><label class="full">ID de PDV<input name="pdv" inputmode="numeric" pattern="[0-9]+" data-numeric required maxlength="80" value="${esc(ticket.pdv||'')}"></label><label class="full">Descripción de la solicitud<textarea name="description" required minlength="8" maxlength="12000">${esc(ticket.description||'')}</textarea></label>`:'';
@@ -766,6 +818,12 @@
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.auth.updateUser({ password: formData(form).password }); if (error) throw error; }); };
   }
   document.addEventListener('change', event => {
+    if(state.me?.role==='validador'&&(event.target?.dataset?.batchTicket||event.target?.id==='analyst-select-visible')){
+      if(event.target.id==='analyst-select-visible'){analystSelection.clear();if(event.target.checked)Array.from(document.querySelectorAll('[data-batch-ticket]:not(:disabled)')).slice(0,window.PQRAnalystBatch.MAX).forEach(box=>analystSelection.add(box.dataset.batchTicket));}
+      else if(event.target.checked){if(analystSelection.size>=window.PQRAnalystBatch.MAX){event.target.checked=false;showError(new Error('Selecciona máximo 100 PQR por operación.'));return;}analystSelection.add(event.target.dataset.batchTicket);}
+      else analystSelection.delete(event.target.dataset.batchTicket);
+      updateAnalystSelection();return;
+    }
     const role = event.target?.dataset?.typeFilter;
     if (!role || role !== state.me?.role || !Object.hasOwn(listTypes, role)) return;
     listTypes[role] = event.target.value;
@@ -776,15 +834,20 @@
     const type = button.dataset.action; const ticket = [...state.tickets, ...state.deleted].find(item => item.id === button.dataset.id);
     const reportTicket = state.me?.role==='gerente'?managerTickets().find(item=>item.id===button.dataset.id):null;
     try {
+      if(analystBatchBusy&&['close','batch-assign','batch-dictate','batch-clear','workspace','logout'].includes(type))return;
       if (type === 'close') return closeModal();
+      if(type==='batch-clear'&&state.me?.role==='validador'){analystSelection.clear();updateAnalystSelection();return;}
+      if(type==='batch-assign'&&state.me?.role==='validador')return analystBatchForm('assign');
+      if(type==='batch-dictate'&&state.me?.role==='validador')return analystBatchForm('dictate');
       if(type==='workspace'&&window.PQRScopes.eligible(state.me?.role)){
+        analystSelection.clear();
         workspace=button.dataset.scope==='internal'?'internal':'external';
         history.replaceState(null,'',workspace==='internal'?'#gestion':'#clientes');
         for(const key of Object.keys(analystFilters))analystFilters[key]='all';
         for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
         auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
       }
-      if (type === 'logout') { await db.auth.signOut(); state.me = null; return renderLogin(); }
+      if (type === 'logout') { analystSelection.clear(); await db.auth.signOut(); state.me = null; return renderLogin(); }
       if (type === 'password') return passwordForm();
       if (type === 'notifications') {
         modal('Notificaciones', state.notifications.length ? `<div class="list">${state.notifications.map(item => `<div class="list-item"><strong>${esc(item.title)}</strong><p>${esc(item.message)}</p><small>${fmt(item.created_at)}</small></div>`).join('')}</div>` : '<p class="empty">No tienes notificaciones.</p>');

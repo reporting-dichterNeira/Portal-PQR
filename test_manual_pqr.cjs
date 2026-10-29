@@ -15,7 +15,7 @@ function portal(role = 'validador', users) {
     { id: 'inactive', name: 'Inactivo', username: 'inactivo', role: 'comercial', active: false },
     { id: 'creator', name: 'Analistas', username: 'analistas', role, active: true },
   ], tickets: [], staff: {} };
-  const context = vm.createContext({
+  const context = vm.createContext({analystSelection:new Set(),
     state, managerState: {}, analystFilters: {}, auditLookup: undefined, managerTickets:()=>[],
     workspace:'external',scopeTickets:()=>state.tickets,location:{hash:'#clientes'},window:{PQRNavigation:{homeRoute:()=>false},PQRScopes:{label:()=> 'PQR de clientes'}},
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
