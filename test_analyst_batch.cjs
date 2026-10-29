@@ -50,3 +50,15 @@ test('selection exists only for analysts, disables completed/other types and dro
  assert.match(html,/data-batch-ticket="two"[^>]+disabled/);assert.match(html,/data-batch-ticket="rdg"[^>]+disabled/);
  assert.doesNotMatch(vm.runInContext('ticketTable(cases,"redigitador")',c),/data-batch-ticket|analyst-select-visible/);
 });
+test('select-visible reflects its capped group so one more click can deselect it',()=>{
+ const app=fs.readFileSync('docs/assets/production.js','utf8'),selection=new Set(Array.from({length:100},(_,i)=>String(i)));
+ const boxes=Array.from({length:170},(_,i)=>({dataset:{batchTicket:String(i)},closest:()=>({classList:{toggle(){}}})}));
+ const all={},counter={};
+ const c=vm.createContext({window:{PQRAnalystBatch:batch},analystSelection:selection,
+  document:{querySelectorAll:selector=>selector.startsWith('[data-batch-ticket]')?boxes:[]},
+  $:selector=>selector==='#analyst-select-visible'?all:counter});
+ vm.runInContext(app.slice(app.indexOf('  function updateAnalystSelection('),app.indexOf('  function analystBatchForm(')),c);
+ vm.runInContext('updateAnalystSelection()',c);assert.equal(all.checked,true);assert.equal(all.indeterminate,false);assert.match(counter.textContent,/100/);
+ selection.clear();vm.runInContext('updateAnalystSelection()',c);assert.equal(all.checked,false);assert.equal(all.indeterminate,false);
+ selection.add('one');vm.runInContext('updateAnalystSelection()',c);assert.equal(all.checked,false);assert.equal(all.indeterminate,true);
+});
