@@ -85,9 +85,9 @@ test('error y timeout cancelan el comando y liberan el contexto',async()=>{
   }
 });
 
-function endpoint({role='gerente',active=true,available=true,validSession=true,queryError=false,pending=false,historical=true}={}){
+function endpoint({role='gerente',effectiveRole,roleError=false,active=true,available=true,validSession=true,queryError=false,pending=false,historical=true}={}){
   let handler;const queries=[];
-  const client={auth:{getUser:async()=>({data:{user:validSession?{id:'user'}:null}})},from:table=>{
+  const client={rpc:async()=>({data:effectiveRole??role,error:roleError?{}:null}),auth:{getUser:async()=>({data:{user:validSession?{id:'user'}:null}})},from:table=>{
     const builder={select:()=>builder,eq:()=>builder,in:(_key,ids)=>{queries.push(ids);return table==='pqr_audit_cache'?Promise.resolve({data:pending?[]:[{audit_id:'123',records:[],checked_at:at}],error:queryError?{}:null}):table==='pqr_historical_cases'?Promise.resolve({data:historical?[{id:t.id,data:t}]:[],error:null}):table==='pqr_case_overrides'?Promise.resolve({data:[],error:null}):builder;},is:async()=>({data:available?[{id:t.id,data:t}]:[]}),single:async()=>({data:{role,active}})};
     return builder;
   }};
@@ -119,4 +119,12 @@ test('endpoint verifica los IDs históricos bajo RLS, nunca acepta un ID de audi
  assert.equal((await endpoint({historical:false}).invoke({historicalIds:[t.id]})).status,403);
  assert.equal((await endpoint().invoke({historicalIds:['123']})).status,400);
  assert.equal((await endpoint().invoke({historicalIds:Array(51).fill(t.id)})).status,400);
+});
+
+test('Universal audit reader uses the server role and preserves linked-ticket checks',async()=>{
+ assert.equal((await endpoint({role:'universal',effectiveRole:'gerente'}).invoke()).status,200);
+ for(const effectiveRole of ['validador','redigitador','universal',''])assert.equal((await endpoint({role:'universal',effectiveRole}).invoke()).status,403);
+ assert.equal((await endpoint({role:'universal',effectiveRole:'gerente',active:false}).invoke()).status,403);
+ assert.equal((await endpoint({role:'universal',effectiveRole:'gerente',roleError:true}).invoke()).status,403);
+ assert.equal((await endpoint({role:'universal',effectiveRole:'gerente',available:false}).invoke()).status,403);
 });

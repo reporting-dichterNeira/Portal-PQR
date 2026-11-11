@@ -17,7 +17,7 @@ function reply(origin: string, body: object, status = 200) {
     headers: {
       'content-type': 'application/json',
       'access-control-allow-origin': origin,
-      'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info',
+      'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info, x-pqr-profile',
       'access-control-allow-methods': 'POST, OPTIONS',
       'cache-control': 'no-store',
       vary: 'Origin',
@@ -56,7 +56,7 @@ Deno.serve(async (request) => {
   const email = `${username}@portal-pqr.invalid`;
 
   if (action === 'create') {
-    if (!validUsername || name.length < 3 || !['admin', 'gerente', 'validador', 'redigitador', 'comercial'].includes(role)
+    if (!validUsername || name.length < 3 || !['admin', 'gerente', 'validador', 'redigitador', 'comercial', 'universal'].includes(role)
       || password.length < 8) return reply(origin, { error: 'Usuario, nombre o rol inválidos, o contraseña con menos de 8 caracteres' }, 400);
     if (['validador', 'redigitador'].includes(role)) {
       const { data: existing } = await admin.from('pqr_profiles').select('id').eq('role', role).limit(1);

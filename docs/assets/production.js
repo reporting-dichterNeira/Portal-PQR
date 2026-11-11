@@ -3,7 +3,7 @@
   'use strict';
   const URL = 'https://niwkegxwwwoahcbsoujy.supabase.co';
   const KEY = 'sb_publishable_YCNKUILCQOjMHOue4pkjRw_hf8TJJTT';
-  const db = window.supabase?.createClient(URL, KEY, { auth: { detectSessionInUrl: false } });
+  const db = window.supabase?.createClient(URL, KEY, { auth: { detectSessionInUrl: false }, global: { fetch: window.PQRUniversal.fetchWithProfile } });
   // Public intake uses an isolated anonymous client, never the team's session.
   const publicDb = window.supabase?.createClient(URL, KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'pqr-public-intake-ephemeral' } });
   const publicResult = result => { if (result.data?.error) return { data: null, error: new Error(result.data.error) }; return result; };
@@ -27,7 +27,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const usernameKey = value => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const fmt = value => value ? new Date(value).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—';
-  const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial' };
+  const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial', universal: 'Universal' };
   const clients = ['KO tradicional', 'KO moderno', 'Lindley', 'P&G', 'CBC', 'Gloria', 'Heineken', 'Fifco', 'ABI', 'Otros'];
   const countries = ['Colombia', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Panamá', 'Perú', 'Bolivia', 'Paraguay', 'Costa Rica', 'Ecuador', 'Chile', 'República Dominicana'];
   const standardAreas = ['Campo', 'Validación', 'IT', 'Comercial'];
@@ -56,6 +56,7 @@
   );
   let state = { me: null, users: [], contactEmails: [], staff: { validators: [], redigitators: [] }, tips: [], tipAreas: {}, tickets: [], historical: [], overrides: [], deleted: [], notifications: [] };
   let busy = false;
+  let loadVersion = 0;
   let auditLookup = window.PQRAudits?.empty();
   let auditLookupOwner = null;
   let workspace = ['#internas','#gestion'].includes(location.hash) ? 'internal' : 'external';
@@ -69,6 +70,7 @@
   async function refreshAudits(tickets = managerTickets()) {
     if (auditLookup.loading || !['gerente','admin'].includes(state.me?.role)) return;
     const owner = state.me.id;
+    const lookupVersion=loadVersion;
     auditLookup.loading = true; auditLookup.error = '';
     // One authorized representative per new audit ID; empty IDs need no API call.
     const requested=new Set();
@@ -80,7 +82,7 @@
       if(supiTickets.length) { try {
         auditLookup.progress='Consultando el corte privado de SUPI · KO moderno Chile…';
         const {data:cut,error:cutError}=await db.from('pqr_supi_sync_state').select('checked_at,run_id').eq('source','SUPI').maybeSingle();
-        if(state.me?.id!==owner)return;
+        if(state.me?.id!==owner||lookupVersion!==loadVersion)return;
         if(cutError)throw new Error('No se pudo leer el corte de SUPI. Se conserva la consulta anterior.');
         if(cut) {
           const ids=[...new Set(supiTickets.flatMap(t=>[window.PQRAudits.id(t.auditOriginal),window.PQRAudits.id(t.audit)]).filter(Boolean))];
@@ -88,7 +90,7 @@
           for(let offset=0;offset<ids.length;offset+=100) {
             const batch=ids.slice(offset,offset+100);
             const {data:rows,error}=await db.from('pqr_supi_audit_cache').select('audit_id,records,checked_at,run_id').in('audit_id',batch);
-            if(state.me?.id!==owner)return;
+            if(state.me?.id!==owner||lookupVersion!==loadVersion)return;
             if(error)throw new Error('No se pudo consultar SUPI. Se conservan los datos anteriores.');
             if((rows||[]).some(row=>row.run_id!==cut.run_id))throw new Error('SUPI está actualizando su corte. Pulsa Actualizar panel al terminar.');
             for(const audit of batch)entries[`supi:${audit}`]={rows:[],at:cut.checked_at};
@@ -96,7 +98,7 @@
           }
           // Recheck the cut: never classify a missing ID from mixed snapshots.
           const {data:latest,error:latestError}=await db.from('pqr_supi_sync_state').select('run_id').eq('source','SUPI').maybeSingle();
-          if(state.me?.id!==owner)return;
+          if(state.me?.id!==owner||lookupVersion!==loadVersion)return;
           if(latestError||latest?.run_id!==cut.run_id)throw new Error('El corte de SUPI cambió durante la consulta. Reintenta para leerlo completo.');
           Object.assign(auditLookup.entries,entries);
           auditLookup.supiCheckedAt=cut.checked_at;
@@ -104,13 +106,13 @@
           for(const t of supiTickets)for(const audit of [t.auditOriginal,t.audit].map(window.PQRAudits.id).filter(Boolean))delete auditLookup.entries[`supi:${audit}`];
           auditLookup.supiCheckedAt=null;
         }
-      } catch(error) { if(state.me?.id!==owner)return; auditLookup.error=error.message; } }
+      } catch(error) { if(state.me?.id!==owner||lookupVersion!==loadVersion)return; auditLookup.error=error.message; } }
       for (let offset = 0; offset < tickets.length; offset += 50) {
         auditLookup.progress = `Consultando solicitudes ${offset + 1} a ${Math.min(offset + 50,tickets.length)} de ${tickets.length}…`;
         const progress=$('.audit-status');if(progress)progress.textContent=auditLookup.progress;
         const batch=tickets.slice(offset,offset+50);
         const {data,error} = await db.functions.invoke('pqr-audits',{body:{ticketIds:batch.filter(t=>t.origin!=='historical').map(t=>t.id),historicalIds:batch.filter(t=>t.origin==='historical').map(t=>t.id)}});
-        if (state.me?.id !== owner) return;
+        if (state.me?.id !== owner||lookupVersion!==loadVersion) return;
         if (error) {
           let detail; try { detail = await error.context?.json(); } catch { /* No siempre hay JSON. */ }
           throw new Error(detail?.error || data?.error || 'No se pudieron consultar las auditorías. Reintenta más tarde.');
@@ -125,8 +127,8 @@
         auditLookup.loaded = true;
       }
       auditLookup.loaded = true;
-    } catch (error) { if (state.me?.id === owner) auditLookup.error = [auditLookup.error,error.message].filter(Boolean).join(' · '); }
-    finally { if (state.me?.id === owner) { const dates=Object.values(auditLookup.entries).map(entry=>Date.parse(entry.at)).filter(Number.isFinite);auditLookup.checkedAt=dates.length?new Date(Math.min(...dates)).toISOString():null; auditLookup.loading = false; if(state.me.role==='gerente') dashboard(); } }
+    } catch (error) { if (state.me?.id === owner&&lookupVersion===loadVersion) auditLookup.error = [auditLookup.error,error.message].filter(Boolean).join(' · '); }
+    finally { if (state.me?.id === owner&&lookupVersion===loadVersion) { const dates=Object.values(auditLookup.entries).map(entry=>Date.parse(entry.at)).filter(Number.isFinite);auditLookup.checkedAt=dates.length?new Date(Math.min(...dates)).toISOString():null; auditLookup.loading = false; if(state.me.role==='gerente') dashboard(); } }
   }
 
 
@@ -270,13 +272,25 @@
     return data;
   }
   async function load() {
+    const version=++loadVersion;
     if(window.PQRNavigation.homeRoute(location.hash))return renderHome();
     if(location.hash==='#solicitud-interna')return renderPublicInternal();
     if(location.hash==='#consultar-ticket')return renderPublicLookup();
     const loadRoute=location.hash;
     const { data: session } = await db.auth.getSession();
     if(location.hash!==loadRoute)return;
-    if (!session.session) { state.me = null; renderLogin(); return; }
+    if (!session.session) { window.PQRUniversal.reset(); state.me = null; renderLogin(); return; }
+    const {data:identity,error:identityError}=await db.from('pqr_profiles').select('id,username,name,role,active').eq('id',session.session.user.id).single();
+    if(version!==loadVersion||location.hash!==loadRoute)return;
+    if(identityError)throw identityError;
+    if(!identity?.active){window.PQRUniversal.reset();await db.auth.signOut();state.me=null;renderLogin('Tu cuenta no está activa.');return;}
+    const selectedIdentity=window.PQRUniversal.identity(identity);
+    if(selectedIdentity.role==='universal'){
+      state={...state,me:selectedIdentity,tickets:[],historical:[],overrides:[],deleted:[],notifications:[]};
+      auditLookup=window.PQRAudits?.empty();auditLookupOwner=null;
+      document.title='Elige tu perfil · Portal PQR';
+      $('#app').innerHTML=window.PQRUniversal.menu(selectedIdentity,esc,window.PQRNavigation.icon);return;
+    }
     const queries = await Promise.all([
       db.from('pqr_profiles').select('id,username,name,role,active').order('name'),
       db.from('pqr_staff').select('*').order('name'),
@@ -287,12 +301,12 @@
     ]);
     for (const result of queries) if (result.error) throw result.error;
     const [profiles, staff, tips, cases, notifications, contactEmails] = queries.map(result => result.data);
-    const me = profiles.find(person => person.id === session.session.user.id);
+    const me = selectedIdentity;
     if (!me?.active) { await db.auth.signOut(); state.me = null; renderLogin('Tu cuenta no está activa.'); return; }
     const reporting = ['gerente','admin'].includes(me.role);
     const historical = reporting ? await readAll('pqr_historical_cases','id,data') : [];
     const overrides = reporting ? await readAll('pqr_case_overrides','case_id,source,patch,reason,updated_at,updated_by,history','case_id') : [];
-    if(location.hash!==loadRoute)return;
+    if(location.hash!==loadRoute||version!==loadVersion)return;
     state = {
       me, users: profiles, contactEmails,
       staff: { validators: staff.filter(person => person.role === 'validador'), redigitators: staff.filter(person => person.role === 'redigitador') },
@@ -302,7 +316,7 @@
       deleted: cases.filter(item => item.deleted_at).map(item => ({ ...item.data, deletedAt: item.deleted_at })),
       notifications, historical:historical.map(row=>row.data), overrides,
     };
-    if (auditLookupOwner !== me.id) { auditLookup = window.PQRAudits?.empty(); auditLookupOwner = me.id; }
+    if (auditLookupOwner !== me.id || me.isUniversal) { auditLookup = window.PQRAudits?.empty(); auditLookupOwner = me.id; }
     renderApp();
     // This reads Supabase only; opening Gerencia never wakes Reporting Cluster.
     if (me.role === 'gerente' && !window.PQRNavigation.homeRoute(location.hash) && auditLookup && !auditLookup.loaded) await refreshAudits();
@@ -338,6 +352,7 @@
     const me = state.me;
     $('#app').innerHTML = `<header class="app-header"><div class="brand"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Portal PQR</div></div><nav class="nav" aria-label="Bandeja"><span class="active">${esc(roles[me.role])}</span></nav><div class="user"><span><strong>${esc(me.name)}</strong><br><small>@${esc(me.username)}</small></span><button class="ghost" data-action="notifications">Notificaciones${state.notifications.filter(item => !item.read).length ? ` (${state.notifications.filter(item => !item.read).length})` : ''}</button><button class="ghost" data-action="password">Contraseña</button><button class="ghost" data-action="logout">Salir</button></div></header><main class="layout" id="view"></main>`;
     $('#view').insertAdjacentHTML('beforebegin',window.PQRNavigation.workspaceNav(workspace,me.role));
+    if(me.isUniversal)$('.user').insertAdjacentHTML('afterbegin','<button class="secondary" data-action="universal-menu">Cambiar perfil</button>');
     renderView();
   }
   function renderView() {
@@ -394,7 +409,7 @@
     if(window.PQRAnalystBatch)updateAnalystSelection();
   }
   function redigitator() {
-    const cases = scopeTickets().filter(ticket => ticket.redigitador === state.me.id);
+    const cases = scopeTickets().filter(ticket => ticket.redigitador === state.me.id || (ticket.redigitador && (state.me.isUniversal || state.users.some(user=>user.id===ticket.redigitador&&user.role==='universal'))));
     $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
   }
   function dashboard() {
@@ -892,7 +907,7 @@
     const type = button.dataset.action; const ticket = [...state.tickets, ...state.deleted].find(item => item.id === button.dataset.id);
     const reportTicket = state.me?.role==='gerente'?managerTickets().find(item=>item.id===button.dataset.id):null;
     try {
-      if(analystBatchBusy&&['close','batch-assign','batch-dictate','batch-clear','workspace','logout'].includes(type))return;
+      if(analystBatchBusy&&['close','batch-assign','batch-dictate','batch-clear','workspace','logout','universal-menu','universal-profile'].includes(type))return;
       if (type === 'close') return closeModal();
       if(type==='batch-clear'&&state.me?.role==='validador'){analystSelection.clear();updateAnalystSelection();return;}
       if(type==='batch-assign'&&state.me?.role==='validador')return analystBatchForm('assign');
@@ -905,7 +920,9 @@
         for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
         auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
       }
-      if (type === 'logout') { analystSelection.clear(); await db.auth.signOut(); state.me = null; return renderLogin(); }
+      if (type === 'universal-profile' && state.me?.isUniversal) {window.PQRUniversal.choose(button.dataset.profile);analystSelection.clear();return await load();}
+      if (type === 'universal-menu' && state.me?.isUniversal) {window.PQRUniversal.reset();analystSelection.clear();closeModal();return await load();}
+      if (type === 'logout') { window.PQRUniversal.reset();analystSelection.clear();++loadVersion;await db.auth.signOut(); state.me = null; return renderLogin(); }
       if (type === 'password') return passwordForm();
       if (type === 'notifications') {
         modal('Notificaciones', state.notifications.length ? `<div class="list">${state.notifications.map(item => `<div class="list-item"><strong>${esc(item.title)}</strong><p>${esc(item.message)}</p><small>${fmt(item.created_at)}</small></div>`).join('')}</div>` : '<p class="empty">No tienes notificaciones.</p>');

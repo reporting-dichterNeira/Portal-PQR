@@ -1,0 +1,76 @@
+begin;
+-- Roll back profiles, fixtures and workflow notifications after verification.
+do $test$
+declare actor uuid; normal uuid; person uuid; redperson uuid; commercial uuid; t jsonb; r jsonb; fixture uuid:=gen_random_uuid(); denied boolean; original_role text; audit text;
+begin
+ select id into actor from public.pqr_profiles where role='gerente' and active limit 1;
+ select id into normal from public.pqr_profiles where role='comercial' and active limit 1;
+ select id into person from public.pqr_staff where role='validador' and active limit 1;
+ select id into redperson from public.pqr_staff where role='redigitador' and active limit 1;
+ assert actor is not null and normal is not null and person is not null and redperson is not null;
+ update public.pqr_profiles set role='universal' where id=actor;
+ assert not has_function_privilege('anon','public.pqr_role()','execute');
+ assert not has_function_privilege('authenticated','pqr_private.current_actor()','execute');
+ assert not has_table_privilege('authenticated','public.pqr_profiles','update');
+ perform set_config('request.jwt.claim.sub',actor::text,true);
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
+ perform set_config('request.headers','{}',true);
+ execute 'set local role authenticated';
+ assert public.pqr_role() is null;
+ assert (select count(*) from public.pqr_tickets)=0;
+ execute 'reset role';
+ foreach original_role in array array['admin','comercial','unknown'] loop
+  perform set_config('request.headers',jsonb_build_object('x-pqr-profile',original_role)::text,true);
+  execute 'set local role authenticated';assert public.pqr_role() is null;execute 'reset role';
+ end loop;
+ insert into public.pqr_tickets(id,code,commercial_id,status,data) values(fixture,'PQR-TEST-UNIVERSAL-'||fixture,normal,'Radicado',
+  jsonb_build_object('id',fixture,'code','PQR-TEST-UNIVERSAL-'||fixture,'commercial',normal,'scope','external','requestType','PQR','pdv','1001','client','KO tradicional','country','Honduras','description','Prueba de flujo con reversión','status','Radicado','timeline','[]'::jsonb,'directRedigitation',false));
+ perform set_config('request.headers','{"x-pqr-profile":"validador"}',true);
+ execute 'set local role authenticated';
+ assert public.pqr_role()='validador';
+ assert exists(select 1 from public.pqr_tickets where id=fixture);
+ r:=public.pqr_suggest_audits(array[fixture]);
+ r:=public.pqr_action('assign_validator',fixture,jsonb_build_object('personId',person));
+ r:=public.pqr_action('dictate',fixture,jsonb_build_object('decision','redigit','auditOriginal','9988776655','tipology','Confunde SKU','area','OPS Campo/Validación','response','Respuesta de prueba revertida'));
+ assert r->>'status'='Pendiente de Redigitación';
+ denied:=false;begin perform public.pqr_action('delete',fixture,'{}');exception when raise_exception then denied:=true;end;assert denied;
+ execute 'reset role';
+ perform set_config('request.headers','{"x-pqr-profile":"redigitador"}',true);
+ execute 'set local role authenticated';assert public.pqr_role()='redigitador';
+ r:=public.pqr_action('assign_redigit',fixture,jsonb_build_object('redigitType','Validación','personId',redperson));
+ audit:='999'||floor(random()*1000000000000)::bigint::text;
+ r:=public.pqr_action('redigit',fixture,jsonb_build_object('audit',audit,'notes','Registro de prueba con reversión'));
+ assert r->>'status'='Pendiente de Verificación';
+ denied:=false;begin perform public.pqr_action('verify',fixture,'{"ok":"yes","comment":"No debe aprobar"}');exception when raise_exception then denied:=true;end;assert denied;
+ execute 'reset role';
+ perform set_config('request.headers','{"x-pqr-profile":"validador"}',true);
+ execute 'set local role authenticated';
+ r:=public.pqr_action('verify',fixture,'{"ok":"yes","comment":"Aprobación de prueba con reversión"}');assert r->>'status'='Cerrado';
+ t:=public.pqr_create_manual('{"scope":"external","pdv":"1002","client":"KO tradicional","country":"Honduras","description":"Prueba manual con reversión"}');
+ assert t->>'createdBy'=actor::text;
+ r:=public.pqr_edit_manual((t->>'id')::uuid,(select updated_at from public.pqr_tickets where id=(t->>'id')::uuid),'{"pdv":"1002","client":"KO moderno","country":"Honduras","description":"Descripción corregida de prueba","reason":"Prueba con reversión"}');
+ assert r->>'client'='KO moderno';
+ t:=public.pqr_create_analyst_redigitation('{"scope":"internal","pdv":"1003","auditOriginal":"99887766","client":"KO tradicional","country":"Honduras","description":"Prueba directa con reversión"}');
+ assert t->>'requestType'='RDG';
+ execute 'reset role';
+ perform set_config('request.headers','{"x-pqr-profile":"gerente"}',true);
+ execute 'set local role authenticated';assert public.pqr_role()='gerente';
+ assert exists(select 1 from public.pqr_historical_cases);
+ perform 1 from public.pqr_audit_cache limit 1;
+ denied:=false;begin perform public.pqr_create_analyst_redigitation('{}');exception when raise_exception then denied:=true;end;assert denied;
+ denied:=false;begin perform public.pqr_admin_staff(null,'validador','No permitido',true);exception when raise_exception then denied:=true;end;assert denied;
+ execute 'reset role';
+ assert (select role='universal' from public.pqr_profiles where id=actor);
+ update public.pqr_profiles set active=false where id=actor;
+ execute 'set local role authenticated';assert public.pqr_role() is null;execute 'reset role';
+ -- A normal user cannot escalate by forging the same header.
+ perform set_config('request.jwt.claim.sub',normal::text,true);
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',normal,'role','authenticated')::text,true);
+ perform set_config('request.headers','{"x-pqr-profile":"gerente"}',true);
+ execute 'set local role authenticated';assert public.pqr_role()='comercial';
+ assert (select count(*) from public.pqr_historical_cases)=0;
+ denied:=false;begin perform public.pqr_action('assign_validator',fixture,jsonb_build_object('personId',person));exception when raise_exception then denied:=true;end;assert denied;
+ execute 'reset role';
+end $test$;
+select 'UNIVERSAL_THREE_ROLES_WORKFLOW_RLS_AND_NO_ADMIN_OK' as verification;
+rollback;

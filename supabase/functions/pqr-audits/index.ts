@@ -8,7 +8,7 @@ const auditId = value => /^\d{1,30}$/.test(String(value ?? '').trim()) ? String(
 Deno.serve(async request => {
   const origin = request.headers.get('origin') || '';
   const headers = {'content-type':'application/json','access-control-allow-origin':origin,
-    'access-control-allow-headers':'authorization,apikey,content-type,x-client-info',
+    'access-control-allow-headers':'authorization,apikey,content-type,x-client-info,x-pqr-profile',
     'access-control-allow-methods':'POST,OPTIONS','cache-control':'no-store','vary':'Origin'};
   const reply = (body:object,status=200) => new Response(JSON.stringify(body),{status,headers});
   if (!allowedOrigins.has(origin)) return new Response('Forbidden',{status:403});
@@ -18,12 +18,13 @@ Deno.serve(async request => {
   if (!token) return reply({error:'Sesión requerida'},401);
   try {
     const client = createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_ANON_KEY')!,{
-      global:{headers:{Authorization:`Bearer ${token}`}},auth:{persistSession:false,autoRefreshToken:false},
+      global:{headers:{Authorization:`Bearer ${token}`,'x-pqr-profile':request.headers.get('x-pqr-profile')||''}},auth:{persistSession:false,autoRefreshToken:false},
     });
     const {data:identity,error:authError} = await client.auth.getUser(token);
     if (authError || !identity.user) return reply({error:'Sesión inválida'},401);
     const {data:actor,error:profileError} = await client.from('pqr_profiles').select('role,active').eq('id',identity.user.id).single();
-    if (profileError || !actor?.active || !['gerente','admin'].includes(actor.role)) return reply({error:'Consulta reservada a Gerencia y Administración'},403);
+    const {data:effectiveRole,error:roleError}=await client.rpc('pqr_role');
+    if (profileError || roleError || !actor?.active || !['gerente','admin'].includes(effectiveRole)) return reply({error:'Consulta reservada a Gerencia y Administración'},403);
     let input;
     try { input = await request.json(); } catch { return reply({error:'Solicitud inválida'},400); }
     const ticketIds = input?.ticketIds ?? [], historicalIds = input?.historicalIds ?? [];
