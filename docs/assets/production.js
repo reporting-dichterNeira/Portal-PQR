@@ -304,8 +304,7 @@
     const me = selectedIdentity;
     if (!me?.active) { await db.auth.signOut(); state.me = null; renderLogin('Tu cuenta no está activa.'); return; }
     const reporting = ['gerente','admin'].includes(me.role);
-    const historical = reporting ? await readAll('pqr_historical_cases','id,data') : [];
-    const overrides = reporting ? await readAll('pqr_case_overrides','case_id,source,patch,reason,updated_at,updated_by,history','case_id') : [];
+    const [historical, overrides] = reporting ? await Promise.all([readAll('pqr_historical_cases','id,data'),readAll('pqr_case_overrides','case_id,source,patch,reason,updated_at,updated_by,history','case_id')]) : [[], []];
     if(location.hash!==loadRoute||version!==loadVersion)return;
     state = {
       me, users: profiles, contactEmails,
@@ -920,7 +919,20 @@
         for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
         auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
       }
-      if (type === 'universal-profile' && state.me?.isUniversal) {window.PQRUniversal.choose(button.dataset.profile);analystSelection.clear();return await load();}
+      if (type === 'universal-profile' && state.me?.isUniversal) {
+        const target=window.PQRUniversal.profiles.find(profile=>profile.role===button.dataset.profile);
+        if(!target)return;
+        window.PQRUniversal.choose(target.role);analystSelection.clear();
+        document.querySelectorAll('[data-action="universal-profile"]').forEach(item=>item.disabled=true);
+        const status=document.querySelector('#universal-loading');
+        if(status)status.textContent=`Abriendo ${target.title}… Puede tardar unos segundos mientras se cargan los datos.`;
+        button.setAttribute('aria-busy','true');
+        try{return await load();}catch(error){
+          window.PQRUniversal.reset();
+          if(state.me?.isUniversal){state.me={...state.me,role:'universal'};document.title='Elige tu perfil · Portal PQR';$('#app').innerHTML=window.PQRUniversal.menu(state.me,esc,window.PQRNavigation.icon);}
+          throw error;
+        }
+      }
       if (type === 'universal-menu' && state.me?.isUniversal) {window.PQRUniversal.reset();analystSelection.clear();closeModal();return await load();}
       if (type === 'logout') { window.PQRUniversal.reset();analystSelection.clear();++loadVersion;await db.auth.signOut(); state.me = null; return renderLogin(); }
       if (type === 'password') return passwordForm();
