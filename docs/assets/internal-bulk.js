@@ -1,7 +1,7 @@
 /* Internal public intake: every row becomes a separate ticket, never a grouped case. */
 window.PQRInternalBulk=(()=>{
-  const max=50, fields=['pdv','description','auditOriginal'];
-  const blank=()=>({pdv:'',description:'',auditOriginal:''});
+  const max=50, fields=['pdv','description','auditOriginal','priority'];
+  const blank=()=>({pdv:'',description:'',auditOriginal:'',priority:''});
   const text=value=>String(value??'').trim();
   function count(value){const n=Number(value);if(!Number.isInteger(n)||n<1||n>max)throw new Error('Indica entre 1 y 50 PDV.');return n;}
   // Excel TSV supports quoted tabs, quoted multiline cells and escaped quotes.
@@ -44,14 +44,29 @@ window.PQRInternalBulk=(()=>{
       const r=Object.fromEntries(fields.map(key=>[key,text(row[key])]));
       if(!/^[0-9]{1,80}$/.test(r.pdv))throw new Error(`Fila ${i+1}: completa un ID de PDV numérico, sin separadores ni notación científica.`);
       if((kind!=='PQR'||r.auditOriginal)&&!/^[0-9]{1,80}$/.test(r.auditOriginal))throw new Error(`Fila ${i+1}: completa el ID de auditoría numérico.`);
+      if(!['1','2','3'].includes(r.priority))throw new Error(`Fila ${i+1}: selecciona una prioridad de 1 a 3.`);
       if(r.description.length<8||r.description.length>12000)throw new Error(`Fila ${i+1}: el detalle debe tener entre 8 y 12.000 caracteres.`);
       const key=r.pdv+'|'+r.auditOriginal;if(seen.has(key))throw new Error(`Fila ${i+1}: el PDV y la auditoría están repetidos en este envío.`);seen.add(key);
       return r;
     });
   }
+  function excelRows(workbook){
+    if(!workbook.SheetNames.length)throw new Error('El Excel no contiene hojas.');
+    const data=window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{header:1,raw:false,defval:'',blankrows:false});
+    const norm=value=>text(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+    if(!data.length||!['idpdv','iddepdv'].includes(norm(data[0][0]))||norm(data[0][1])!=='detalle'||!['prioridad','prioridad123'].includes(norm(data[0][2])))throw new Error('El Excel debe comenzar con las columnas Id_pdv, Detalle y Prioridad (1-2-3).');
+    const values=data.slice(1).filter(row=>row.some(cell=>text(cell)));
+    count(values.length);
+    return values.map((row,i)=>{const pdv=text(row[0]),description=text(row[1]),priority=text(row[2]);
+      if(!/^[0-9]{1,80}$/.test(pdv))throw new Error(`Fila ${i+2}: el ID de PDV debe ser numérico. Guarda los ID largos como texto en Excel.`);
+      if(description.length<8||description.length>12000)throw new Error(`Fila ${i+2}: el detalle debe tener entre 8 y 12.000 caracteres.`);
+      if(!['1','2','3'].includes(priority))throw new Error(`Fila ${i+2}: la prioridad debe ser 1, 2 o 3.`);
+      return {pdv,description,priority,auditOriginal:''};
+    });
+  }
   function bind(form,esc){
     const anchor=form.querySelector('#public-pdv-label');
-    anchor.insertAdjacentHTML('beforebegin',`<div class="full pdv-mode" role="group" aria-label="Cantidad de PDV"><button type="button" class="pdv-mode-button" data-pdv-mode="single" aria-pressed="true">Un único PDV</button><button type="button" class="pdv-mode-button" data-pdv-mode="multiple" aria-pressed="false">Múltiples PDV</button></div><section id="internal-multiple" class="full hide" aria-label="Solicitudes por PDV"><div class="bulk-pdv-controls"><label>¿Cuántos ID de PDV?<input name="pdvCount" type="number" min="1" max="50" step="1" value="10" disabled></label><button type="button" class="secondary" id="pdv-prepare" disabled>Preparar filas</button></div><p class="sub">Mismo estudio y país, un radicado por fila. Máximo 50 PDV por envío.</p><details class="pdv-paste-help"><summary>Pegar ID y detalles desde Excel</summary><label>Copia ID de PDV y Detalle en dos columnas<textarea id="pdv-excel" rows="3" placeholder="Pega aquí las filas copiadas de Excel" disabled></textarea></label><p class="sub">También puedes pegar directamente en cualquier celda de la lista. Una columna pega solo ese campo; dos columnas pegan ID y Detalle. La tercera puede contener el ID de auditoría.</p><button type="button" class="secondary" id="pdv-apply" disabled>Distribuir en las filas</button></details><p id="pdv-bulk-message" role="status" aria-live="polite"></p><div id="pdv-bulk-rows"></div><p class="sub">Los adjuntos de abajo se copiarán a cada solicitud. Máximo 100 MB en total contando todas las copias.</p></section>`);
+    anchor.insertAdjacentHTML('beforebegin',`<div class="full pdv-mode" role="group" aria-label="Cantidad de PDV"><button type="button" class="pdv-mode-button" data-pdv-mode="single" aria-pressed="true">Un único PDV</button><button type="button" class="pdv-mode-button" data-pdv-mode="multiple" aria-pressed="false">Múltiples PDV</button></div><section id="internal-multiple" class="full hide" aria-label="Solicitudes por PDV"><div class="bulk-pdv-controls"><label>¿Cuántos ID de PDV?<input name="pdvCount" type="number" min="1" max="50" step="1" value="10" disabled></label><button type="button" class="secondary" id="pdv-prepare" disabled>Preparar filas</button></div><p class="sub">Mismo estudio y país, un radicado por fila. Máximo 50 PDV por envío.</p><div class="pdv-paste-help"><label>Adjuntar Excel<input id="pdv-file" type="file" accept=".xlsx,.xls" disabled></label><p class="sub">Primera hoja: Id_pdv, Detalle y Prioridad (1-2-3). Cada fila crea una solicitud individual. Máximo 50 filas.</p></div><p id="pdv-bulk-message" role="status" aria-live="polite"></p><div id="pdv-bulk-rows"></div><p class="sub">Los adjuntos de abajo se copiarán a cada solicitud. Máximo 100 MB en total contando todas las copias.</p></section>`);
     const section=form.querySelector('#internal-multiple'),output=section.querySelector('#pdv-bulk-rows'),message=section.querySelector('#pdv-bulk-message');
     const single=[anchor,form.querySelector('#public-audit-label'),form.elements.description.closest('label')];
     let active=false,rows=Array.from({length:10},blank);
@@ -59,7 +74,7 @@ window.PQRInternalBulk=(()=>{
     const draw=()=>{
       const auditRequired=form.elements.kind.value!=='PQR';
       const audit=auditRequired||rows.some(row=>text(row.auditOriginal));
-      output.innerHTML=`<div class="pdv-grid-head ${audit?'with-audit':''}" aria-hidden="true"><span>ID de PDV</span><span>Detalle</span>${audit?'<span>ID de auditoría</span>':''}</div>${rows.map((row,i)=>`<div class="pdv-grid-row ${audit?'with-audit':''}" data-pdv-row="${i}"><label><span class="pdv-cell-label">ID de PDV ${i+1}</span><input aria-label="ID de PDV ${i+1}" data-pdv-field="pdv" inputmode="numeric" pattern="[0-9]{1,80}" maxlength="80" required value="${esc(row.pdv)}" ${active?'':'disabled'}></label><label><span class="pdv-cell-label">Detalle ${i+1}</span><textarea aria-label="Detalle ${i+1}" data-pdv-field="description" minlength="8" maxlength="12000" rows="2" required ${active?'':'disabled'}>${esc(row.description)}</textarea></label>${audit?`<label><span class="pdv-cell-label">ID de auditoría ${i+1}</span><input aria-label="ID de auditoría ${i+1}" data-pdv-field="auditOriginal" inputmode="numeric" pattern="[0-9]{1,80}" maxlength="80" required value="${esc(row.auditOriginal)}" ${active?'':'disabled'}></label>`:''}</div>`).join('')}`;
+      output.innerHTML=`<div class="pdv-grid-head ${audit?'with-audit':''}" aria-hidden="true"><span>ID de PDV</span><span>Detalle / prioridad</span>${audit?'<span>ID de auditoría</span>':''}</div>${rows.map((row,i)=>`<div class="pdv-grid-row ${audit?'with-audit':''}" data-pdv-row="${i}"><label><span class="pdv-cell-label">ID de PDV ${i+1}</span><input aria-label="ID de PDV ${i+1}" data-pdv-field="pdv" inputmode="numeric" pattern="[0-9]{1,80}" maxlength="80" required value="${esc(row.pdv)}" ${active?'':'disabled'}></label><label><span class="pdv-cell-label">Detalle ${i+1}</span><textarea aria-label="Detalle ${i+1}" data-pdv-field="description" minlength="8" maxlength="12000" rows="2" required ${active?'':'disabled'}>${esc(row.description)}</textarea><select aria-label="Prioridad ${i+1}" data-pdv-field="priority" required ${active?'':'disabled'}><option value="">Selecciona prioridad</option>${[1,2,3].map(n=>`<option value="${n}" ${String(row.priority)===String(n)?'selected':''}>Prioridad ${n}</option>`).join('')}</select></label>${audit?`<label><span class="pdv-cell-label">ID de auditoría ${i+1}</span><input aria-label="ID de auditoría ${i+1}" data-pdv-field="auditOriginal" inputmode="numeric" pattern="[0-9]{1,80}" maxlength="80" required value="${esc(row.auditOriginal)}" ${active?'':'disabled'}></label>`:''}</div>`).join('')}`;
       output.querySelectorAll('[data-pdv-field="auditOriginal"]').forEach(input=>input.required=auditRequired);
       output.querySelectorAll('[data-pdv-field]').forEach(input=>input.addEventListener('paste',event=>{
         const value=event.clipboardData?.getData('text/plain');if(!value)return;
@@ -76,19 +91,24 @@ window.PQRInternalBulk=(()=>{
       capture();active=button.dataset.pdvMode==='multiple';section.classList.toggle('hide',!active);
       form.querySelectorAll('[data-pdv-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
       for(const label of single){label.classList.toggle('hide',active);label.querySelector('input,textarea').disabled=active;}
-      section.querySelectorAll('input,textarea,button').forEach(el=>el.disabled=!active);
+      section.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=!active);
       form.elements.pdvCount.required=active;draw();
     });
     section.querySelector('#pdv-prepare').onclick=()=>{
       capture();message.textContent='';
       try{const n=count(form.elements.pdvCount.value);if(n<rows.length&&rows.slice(n).some(row=>fields.some(key=>text(row[key]))))throw new Error('Hay datos en las filas que quitarías. Vacíalas o conserva esa cantidad.');while(rows.length<n)rows.push(blank());rows=rows.slice(0,n);draw();}catch(error){message.textContent=error.message;}
     };
-    section.querySelector('#pdv-apply').onclick=()=>{
-      capture();message.textContent='';
-      try{rows=paste(rows,section.querySelector('#pdv-excel').value);form.elements.pdvCount.value=rows.length;draw();message.textContent='Filas distribuidas. Puedes editar cada ID y cada detalle.';}catch(error){message.textContent=error.message;}
+    section.querySelector('#pdv-file').onchange=async event=>{
+      const file=event.target.files[0];if(!file)return;
+      try{if(file.size>10*1024*1024)throw new Error('El archivo debe pesar máximo 10 MB.');
+        if(!window.XLSX)throw new Error('No está disponible el lector de Excel.');
+        const loaded=excelRows(window.XLSX.read(await file.arrayBuffer(),{type:'array'}));
+        capture();if(rows.some(row=>fields.some(key=>text(row[key]))))throw new Error('Para evitar sobrescribir datos, vacía la lista antes de cargar otro Excel.');
+        rows=loaded;form.elements.pdvCount.value=rows.length;draw();message.textContent=`${rows.length} filas cargadas. Revisa los datos antes de enviar.`;
+      }catch(error){message.textContent=error.message;}finally{event.target.value='';}
     };
     draw();
-    return {get active(){return active;},syncKind,read(){capture();if(count(form.elements.pdvCount.value)!==rows.length)throw new Error('Pulsa «Preparar filas» para aplicar la cantidad indicada.');return validate(rows,form.elements.kind.value);},restore(){for(const label of single)label.querySelector('input,textarea').disabled=active;section.querySelectorAll('input,textarea,button').forEach(el=>el.disabled=!active);}};
+    return {get active(){return active;},syncKind,read(){capture();if(count(form.elements.pdvCount.value)!==rows.length)throw new Error('Pulsa «Preparar filas» para aplicar la cantidad indicada.');return validate(rows,form.elements.kind.value);},restore(){for(const label of single)label.querySelector('input,textarea').disabled=active;section.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=!active);}};
   }
   function receipt(result,esc,failed=[]){
     return `<section class="card internal-receipt" role="status"><span class="eyebrow">SOLICITUDES INTERNAS REGISTRADAS</span><h1>${result.tickets.length} solicitudes individuales</h1><p>Cada PDV tiene su propio radicado y aparecerá por separado en la bandeja del equipo. Guarda esta lista para consultar cada caso.</p><div class="table-wrap"><table class="table"><thead><tr><th>ID de PDV</th><th>Radicado</th></tr></thead><tbody>${result.tickets.map(t=>`<tr><td>${esc(t.pdv)}</td><td><strong>${esc(t.code)}</strong></td></tr>`).join('')}</tbody></table></div>${failed.length?`<p role="alert">Los tickets se crearon, pero hubo problemas con adjuntos: ${failed.map(esc).join('; ')}. Entrega esos soportes al equipo con su radicado; no repitas el envío.</p>`:''}<div class="actions"><button type="button" class="secondary" id="download-internal-codes">Descargar radicados</button><button type="button" class="primary" id="another-internal">Enviar otra solicitud</button><a class="ghost module-link" href="#consultar-ticket">Consultar mi ticket</a></div></section>`;
@@ -97,5 +117,5 @@ window.PQRInternalBulk=(()=>{
     const content='ID de PDV\tRadicado\r\n'+result.tickets.map(t=>t.pdv+'\t'+t.code).join('\r\n');
     const url=URL.createObjectURL(new Blob([content],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='radicados-internos.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
-  return {max,count,parse,paste,validate,bind,receipt,download};
+  return {max,count,parse,paste,excelRows,validate,bind,receipt,download};
 })();

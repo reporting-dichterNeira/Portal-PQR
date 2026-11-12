@@ -3,8 +3,8 @@ function api(){const c=vm.createContext({window:{}});vm.runInContext(fs.readFile
 const plain=value=>JSON.parse(JSON.stringify(value));
 test('Excel pega ID y detalles por fila sin perder ceros ni IDs grandes',()=>{
  const a=api(),rows=a.paste([], 'ID de PDV\tDetalle\r\n000123\tPrimera incidencia\r\n900719925474099312345\tSegunda incidencia\r\n');
- assert.deepEqual(plain(rows),[{pdv:'000123',description:'Primera incidencia',auditOriginal:''},{pdv:'900719925474099312345',description:'Segunda incidencia',auditOriginal:''}]);
- assert.equal(a.validate(rows,'PQR').length,2);
+ assert.deepEqual(plain(rows),[{pdv:'000123',description:'Primera incidencia',auditOriginal:'',priority:''},{pdv:'900719925474099312345',description:'Segunda incidencia',auditOriginal:'',priority:''}]);
+ rows.forEach(r=>r.priority='1'); assert.equal(a.validate(rows,'PQR').length,2);
 });
 test('Excel conserva tabulaciones, saltos de línea y comillas dentro del detalle',()=>{
  const a=api(),rows=a.paste([],'123\t"Detalle con\nsegunda línea y ""comillas"" y\tuna tabulación"\n');
@@ -20,9 +20,9 @@ test('columnas independientes de ID o detalles se alinean desde la celda elegida
 });
 test('tres tipos generan filas individuales, sin sustituir los requisitos de auditoría',()=>{
  const a=api(),rows=a.paste([],'123\tDetalle de la solicitud\t987');
- for(const kind of ['PQR','RDG','EDC'])assert.equal(a.validate(rows,kind)[0].auditOriginal,'987');
+ rows[0].priority='1'; for(const kind of ['PQR','RDG','EDC'])assert.equal(a.validate(rows,kind)[0].auditOriginal,'987');
  for(const kind of ['RDG','EDC'])assert.throws(()=>a.validate([{pdv:'123',description:'Detalle válido'}],kind),/auditoría/);
- assert.throws(()=>a.validate([{pdv:'123',description:'corto'}],'PQR'),/detalle/);
+ assert.throws(()=>a.validate([{pdv:'123',description:'corto',priority:'1'}],'PQR'),/detalle/);
  assert.throws(()=>a.validate([{pdv:'1e12',description:'Detalle válido'}],'PQR'),/notación científica/);
  assert.throws(()=>a.validate([rows[0],rows[0]],'PQR'),/repetidos/);
 });

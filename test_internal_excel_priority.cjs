@@ -1,0 +1,6 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const XLSX=require('./docs/assets/vendor/xlsx.full.min.js');
+function api(){const c=vm.createContext({window:{XLSX}});vm.runInContext(fs.readFileSync('docs/assets/internal-bulk.js','utf8'),c);return c.window.PQRInternalBulk;}
+function workbook(rows){const w=XLSX.utils.book_new();XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet(rows),'Solicitudes');return w;}
+test('lee Excel y preserva ID de texto y prioridad por fila',()=>{const a=api(),r=a.excelRows(workbook([['Id_pdv','Detalle','Prioridad (1-2-3)'],['00123','Revisar exhibidor',1],['998','Revisar fotografía',3]]));assert.equal(r.length,2);assert.equal(r[0].pdv,'00123');assert.equal(r[0].priority,'1');assert.equal(r[1].priority,'3');assert.equal(a.validate(r,'PQR').length,2);assert.throws(()=>a.validate(r,'RDG'),/auditoría/);});
+test('rechaza encabezados, prioridad y datos inválidos',()=>{const a=api();assert.throws(()=>a.excelRows(workbook([['ID','Detalle','Prioridad'],['1','Detalle suficiente','1']])),/columnas/);assert.throws(()=>a.excelRows(workbook([['Id_pdv','Detalle','Prioridad'],['1','Detalle suficiente','4']])),/prioridad/);assert.throws(()=>a.excelRows(workbook([['Id_pdv','Detalle','Prioridad'],['1e12','Detalle suficiente','1']])),/numérico/);});
