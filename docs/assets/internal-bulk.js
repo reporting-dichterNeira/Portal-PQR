@@ -1,9 +1,9 @@
 /* Internal public intake: every row becomes a separate ticket, never a grouped case. */
 window.PQRInternalBulk=(()=>{
-  const max=50, fields=['pdv','description','auditOriginal','priority'];
+  const max=200, fields=['pdv','description','auditOriginal','priority'];
   const blank=()=>({pdv:'',description:'',auditOriginal:'',priority:''});
   const text=value=>String(value??'').trim();
-  function count(value){const n=Number(value);if(!Number.isInteger(n)||n<1||n>max)throw new Error('Indica entre 1 y 50 PDV.');return n;}
+  function count(value){const n=Number(value);if(!Number.isInteger(n)||n<1||n>max)throw new Error('Indica entre 1 y 200 PDV.');return n;}
   // Excel TSV supports quoted tabs, quoted multiline cells and escaped quotes.
   function parse(value){
     value=String(value??'').replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
@@ -30,7 +30,7 @@ window.PQRInternalBulk=(()=>{
     const normalized=text(data[0][0]).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
     if((column==='pdv'&&['idpdv','iddepdv','pdv'].includes(normalized))||(column==='description'&&normalized==='detalle')||(column==='auditOriginal'&&['idauditoria','iddeauditoria'].includes(normalized)))data=data.slice(1);
     if(!data.length)throw new Error('Solo copiaste los encabezados; incluye los datos.');
-    if(start+data.length>max)throw new Error('Puedes pegar hasta 50 PDV por envío. No se cambió la lista.');
+    if(start+data.length>max)throw new Error('Puedes pegar hasta 200 PDV por envío. No se cambió la lista.');
     if(data.some(row=>row.length>(column==='pdv'?3:1)))throw new Error('Pega ID de PDV y Detalle en la primera columna. La tercera columna puede ser el ID de auditoría.');
     const next=current.map(row=>({...row}));
     while(next.length<start+data.length)next.push(blank());
@@ -66,7 +66,7 @@ window.PQRInternalBulk=(()=>{
   }
   function bind(form,esc){
     const anchor=form.querySelector('#public-pdv-label');
-    anchor.insertAdjacentHTML('beforebegin',`<div class="full pdv-mode" role="group" aria-label="Cantidad de PDV"><button type="button" class="pdv-mode-button" data-pdv-mode="single" aria-pressed="true">Un único PDV</button><button type="button" class="pdv-mode-button" data-pdv-mode="multiple" aria-pressed="false">Múltiples PDV</button></div><section id="internal-multiple" class="full hide" aria-label="Solicitudes por PDV"><div class="bulk-pdv-controls"><label>¿Cuántos ID de PDV?<input name="pdvCount" type="number" min="1" max="50" step="1" value="10" disabled></label><button type="button" class="secondary" id="pdv-prepare" disabled>Preparar filas</button></div><p class="sub">Mismo estudio y país, un radicado por fila. Máximo 50 PDV por envío.</p><div class="pdv-paste-help"><label>Adjuntar Excel<input id="pdv-file" type="file" accept=".xlsx,.xls" disabled></label><p class="sub">Primera hoja: Id_pdv, Detalle y Prioridad (1-2-3). Cada fila crea una solicitud individual. Máximo 50 filas.</p></div><p id="pdv-bulk-message" role="status" aria-live="polite"></p><div id="pdv-bulk-rows"></div><p class="sub">Los adjuntos de abajo se copiarán a cada solicitud. Máximo 100 MB en total contando todas las copias.</p></section>`);
+    anchor.insertAdjacentHTML('beforebegin',`<div class="full pdv-mode" role="group" aria-label="Cantidad de PDV"><button type="button" class="pdv-mode-button" data-pdv-mode="single" aria-pressed="true">Un único PDV</button><button type="button" class="pdv-mode-button" data-pdv-mode="multiple" aria-pressed="false">Múltiples PDV</button></div><section id="internal-multiple" class="full hide" aria-label="Solicitudes por PDV"><div class="bulk-pdv-controls"><label>¿Cuántos ID de PDV?<input name="pdvCount" type="number" min="1" max="200" step="1" value="10" disabled></label><button type="button" class="secondary" id="pdv-prepare" disabled>Preparar filas</button></div><p class="sub">Mismo estudio y país, un radicado por fila. Máximo 200 PDV por envío.</p><div class="pdv-paste-help"><label>Adjuntar Excel<input id="pdv-file" type="file" accept=".xlsx,.xls" disabled></label><p class="sub">Primera hoja: Id_pdv, Detalle y Prioridad (1-2-3). Cada fila crea una solicitud individual. Máximo 200 filas.</p><p><a href="assets/plantilla_ticketera_interna.xlsx" download>Descargar plantilla de Excel</a></p></div><p id="pdv-bulk-message" role="status" aria-live="polite"></p><div id="pdv-bulk-rows"></div><p class="sub">Los adjuntos de abajo se copiarán a cada solicitud. Máximo 100 MB en total contando todas las copias.</p></section>`);
     const section=form.querySelector('#internal-multiple'),output=section.querySelector('#pdv-bulk-rows'),message=section.querySelector('#pdv-bulk-message');
     const single=[anchor,form.querySelector('#public-audit-label'),form.elements.description.closest('label')];
     let active=false,rows=Array.from({length:10},blank);

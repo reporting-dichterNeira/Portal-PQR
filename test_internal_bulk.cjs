@@ -28,8 +28,8 @@ test('tres tipos generan filas individuales, sin sustituir los requisitos de aud
 });
 test('cantidades, pegados y columnas fuera de límite no modifican la lista previa',()=>{
  const a=api(),rows=[{pdv:'001',description:'Detalle previo',auditOriginal:''}];
- assert.throws(()=>a.count(51),/50/);assert.throws(()=>a.count(1.5),/50/);
- assert.throws(()=>a.paste(rows,Array(51).fill('123').join('\n')),/50/);
+ assert.throws(()=>a.count(201),/200/);assert.throws(()=>a.count(1.5),/200/);
+ assert.throws(()=>a.paste(rows,Array(201).fill('123').join('\n')),/200/);
  assert.throws(()=>a.paste(rows,'123\tDetalle\t999\tcuarta'),/tercera/);
  assert.equal(rows[0].description,'Detalle previo');assert.equal(rows.length,1);
 });
