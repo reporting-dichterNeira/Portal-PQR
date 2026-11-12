@@ -62,12 +62,22 @@ window.PQRReports = (() => {
     return `<section class="card manager-card monthly-panel" aria-label="Evolutivo mensual de PQR"><div class="card-heading"><h2>Evolutivo mensual de PQR</h2><small>Mes de auditoría · Ola / respaldo del Excel</small></div><p class="sub">Respeta los filtros superiores. Solo PQR, sin redigitaciones directas ni ediciones. Las PQR sin dictamen cuentan en el total, no en «No aplican». El periodo es el mes de la auditoría, no la fecha de recepción.</p><div class="monthly-legend">${series.map(s=>`<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>${svg}<div class="table-wrap"><table class="table monthly-table"><caption>Volumen y resultado por mes de auditoría</caption><thead><tr><th>Mes</th><th>PQR registradas</th><th>Aplican</th><th>No aplican</th><th>Sin dictamen</th></tr></thead><tbody>${rows.map(r=>`<tr><th scope="row">${escapeHtml(label(r.month))}</th><td>${fmt(r.total)}</td><td>${fmt(r.aplica)}</td><td>${fmt(r.noAplica)}</td><td>${fmt(r.pending)}</td></tr>`).join('')||'<tr><td colspan="5">No hay PQR para esta selección.</td></tr>'}</tbody></table></div></section>`;
   }
 
+  function untouched(ticket) {
+    if (closedStatuses.has(ticket.status)) return false;
+    const assigned=Boolean(ticket.validatorPersonId || ticket.assignedAt || ticket.redigitAssignedAt || ticket.redigitatorPersonId || ticket.fieldRedigitatorName);
+    if (assigned) return false;
+    if (ticket.status === 'Radicado') return true;
+    return requestType(ticket) !== 'PQR' && ticket.status === 'Pendiente de Redigitación';
+  }
+
   function summarize(tickets,users=[],staff={}) {
     const decided=tickets.filter(t=>t.applies==='Aplica'||t.applies==='No Aplica');
     const aplica=decided.filter(t=>t.applies==='Aplica').length;
     const noAplica=decided.filter(t=>t.applies==='No Aplica').length;
     const closed=tickets.filter(t=>closedStatuses.has(t.status));
     const open=tickets.length-closed.length;
+    const pending=tickets.filter(untouched).length;
+    const managedOpen=open-pending;
     const closureHours=closed.filter(t=>t.timingComplete!==false&&t.createdAt&&t.closedAt).map(t=>(new Date(t.closedAt)-new Date(t.createdAt))/36e5).filter(x=>Number.isFinite(x)&&x>=0);
     const avgClosure=closureHours.length ? Math.round(closureHours.reduce((a,b)=>a+b,0)/closureHours.length*10)/10 : null;
     const knownValidators=staff.validators||[];
@@ -86,7 +96,7 @@ window.PQRReports = (() => {
       return {name:person?.name||'Responsable histórico',active:person?.active!==false,assigned:own.length,completed:own.filter(t=>t.redigitAt).length,closed:own.filter(t=>t.status==='Cerrado').length};
     }).sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name,'es'));
     return {
-      total:tickets.length,open,closed:closed.length,decided:decided.length,aplica,noAplica,
+      total:tickets.length,open,pending,managedOpen,closed:closed.length,decided:decided.length,aplica,noAplica,
       redigit:tickets.filter(t=>['Pendiente de Redigitación','Devuelto'].includes(t.status)).length,
       verification:tickets.filter(t=>t.status==='Pendiente de Verificación').length,
       redigitRequired:tickets.filter(t=>t.redigitAssignedAt).length,
@@ -144,7 +154,7 @@ window.PQRReports = (() => {
     const recent=selected.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
     return `${shell}${monthlyChart(selected)}${auditPanel}
       <section class="metrics dashboard-metrics" aria-label="Indicadores principales">
-        ${metric('Solicitudes radicadas',fmt(s.total))}${metric('En gestión',fmt(s.open))}${metric('Cerradas',fmt(s.closed),`${pct(s.closed,s.total)}% del total`)}${metric('Aplican',fmt(s.aplica),`${pct(s.aplica,s.decided)}% dictaminadas`)}${metric('No aplican',fmt(s.noAplica),`${pct(s.noAplica,s.decided)}% dictaminadas`)}${metric('Redigitación pendiente',fmt(s.redigit))}${metric('Por verificar',fmt(s.verification))}${metric('Con área adjudicable',fmt(s.adjudicable))}${metric('Tiempo medio de cierre',s.avgClosure===null?'—':`${s.avgClosure} h`)}
+        ${metric('Tickets cerrados',fmt(s.closed),'Finalizados completamente')}${metric('Tickets abiertos',fmt(s.managedOpen),'Con gestión y sin cerrar')}${metric('Tickets pendientes',fmt(s.pending),'Sin gestión todavía')}
       </section>
       <section class="manager-grid" aria-label="Gráficas gerenciales">
         <article class="card manager-card"><div class="card-heading"><h2>Resultado del dictamen</h2><small>Sobre ${fmt(s.decided)} PQR dictaminadas</small></div>${decisionChart(s)}</article>
