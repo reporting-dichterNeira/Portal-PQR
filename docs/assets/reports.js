@@ -97,6 +97,7 @@ window.PQRReports = (() => {
     }).sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name,'es'));
     return {
       total:tickets.length,open,pending,managedOpen,closed:closed.length,decided:decided.length,aplica,noAplica,
+      pqr:tickets.filter(t=>requestType(t)==='PQR').length, redigitations:tickets.filter(t=>requestType(t)==='RDG').length, edits:tickets.filter(t=>requestType(t)==='EDC').length,
       redigit:tickets.filter(t=>['Pendiente de Redigitación','Devuelto'].includes(t.status)).length,
       verification:tickets.filter(t=>t.status==='Pendiente de Verificación').length,
       redigitRequired:tickets.filter(t=>t.redigitAssignedAt).length,
@@ -154,7 +155,7 @@ window.PQRReports = (() => {
     const recent=selected.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
     return `${shell}${monthlyChart(selected)}${auditPanel}
       <section class="metrics dashboard-metrics" aria-label="Indicadores principales">
-        ${metric('Tickets cerrados',fmt(s.closed),'Finalizados completamente')}${metric('Tickets abiertos',fmt(s.managedOpen),'Con gestión y sin cerrar')}${metric('Tickets pendientes',fmt(s.pending),'Sin gestión todavía')}
+        ${metric('Total de tickets recibidos',fmt(s.total))}${metric('Tickets cerrados',fmt(s.closed),'Finalizados completamente')}${metric('Tickets abiertos',fmt(s.managedOpen),'Con gestión y sin cerrar')}${metric('Tickets pendientes',fmt(s.pending),'Sin gestión todavía')}${metric('Tickets por PQR',fmt(s.pqr))}${metric('Tickets por redigitación',fmt(s.redigitations))}${metric('Tickets por edición',fmt(s.edits))}
       </section>
       <section class="manager-grid" aria-label="Gráficas gerenciales">
         <article class="card manager-card"><div class="card-heading"><h2>Resultado del dictamen</h2><small>Sobre ${fmt(s.decided)} PQR dictaminadas</small></div>${decisionChart(s)}</article>
