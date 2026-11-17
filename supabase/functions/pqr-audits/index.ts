@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
 
 // Session-gated cache reader. Never calls Databricks or starts compute.
-const allowedOrigins = new Set(['https://reporting-dichterneira.github.io','http://localhost:8765','http://127.0.0.1:8765']);
+const allowedOrigins = new Set(['https://reporting-dichterneira.github.io','https://portal-pqr.vercel.app','http://localhost:8765','http://127.0.0.1:8765']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const auditId = value => /^\d{1,30}$/.test(String(value ?? '').trim()) ? String(value).trim() : '';
 

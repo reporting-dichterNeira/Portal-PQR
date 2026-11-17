@@ -6,7 +6,7 @@ const admin = createClient(url, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 const allowedOrigins = new Set([
-  'https://reporting-dichterneira.github.io',
+  'https://reporting-dichterneira.github.io','https://portal-pqr.vercel.app',
   'http://localhost:8765',
   'http://127.0.0.1:8765',
 ]);
