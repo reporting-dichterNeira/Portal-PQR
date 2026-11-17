@@ -57,7 +57,7 @@ test('consulta muestra datos de la solicitud sin notas privadas y envío usa UUI
  const lookup=app.slice(app.indexOf('  function renderPublicLookup()'),app.indexOf('  function renderPublicInternal()'));
  assert.match(lookup,/internalAPI.lookup\(code\)/);assert.doesNotMatch(lookup,/t\.(?:requesterEmail|timeline|uploadPaths|response)/);
  for(const field of ['pdv','requesterName','description'])assert.ok(lookup.includes('t.'+field));
- assert.match(lookup,/No encontramos un ticket interno/);assert.match(lookup,/role="status" aria-live="polite"/);
+ assert.match(lookup,/No encontramos solicitudes internas/);assert.match(lookup,/role="status" aria-live="polite"/);
  assert.match(app,/requestId=crypto.randomUUID\(\)/);assert.match(app,/internalAPI.submit\(requestId,payload\)/);
  assert.match(app,/payload.files=files.map/);assert.ok(app.includes("db.rpc('pqr_create_manual',"));
  assert.ok(!app.includes("db.rpc('pqr_create_manual_scoped'"));
