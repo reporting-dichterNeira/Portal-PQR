@@ -42,3 +42,7 @@ Prueba local de la migración de activación: reemplazar COMMIT final por ROLLBA
 
 17 de noviembre de 2026: migraciones instaladas y cola activada. Verificación final: enabled=true, nuevo Cron activo y última ejecución succeeded; Cron anterior pausado; cero avisos internos antiguos pendientes. Las rutas PQR (cuatro destinatarios) y Redigitación/Edición (dos destinatarios) coinciden con las indicadas por el usuario.
 Prueba adicional: `supabase/tests/consolidated_mail_dispatch.sql` comprueba la llamada pg_net y el escape HTML en una transacción revertida, sin enviar otro correo.
+
+## Códigos breves
+
+Los consolidados usan ENV-000001, con seis dígitos consecutivos. Los códigos largos anteriores se conservan como alias de consulta. La migración conserva las claves de deduplicación de avisos y no reenvía correos ya enviados. Verificación del 17/11/2026: envío individual inactivo, cero avisos individuales internos pendientes; envío consolidado activo.

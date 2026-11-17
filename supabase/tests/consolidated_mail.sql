@@ -6,7 +6,7 @@ begin
  payload:=jsonb_build_object('requesterName','Prueba transaccional','requesterEmail','test@example.com','kind','PQR','client','KO tradicional','country','Honduras','rows',jsonb_build_array(jsonb_build_object('pdv','000000001','description','Prueba transaccional uno','priority','1'),jsonb_build_object('pdv','000000002','description','Prueba transaccional dos','priority','0')));
  receipt:=public.pqr_submit_internal_batch(req,payload);
  assert not(receipt ? 'error'),receipt::text;
- assert receipt->>'batchCode' ~ '^ENV-[A-F0-9]{32}$','No hay consolidado';
+ assert receipt->>'batchCode' ~ '^ENV-[0-9]{6}$','No hay consolidado';
  assert jsonb_array_length(receipt->'tickets')=2,'Tickets individuales incompletos';
  again:=public.pqr_submit_internal_batch(req,payload);
  assert again=receipt,'El reintento cambió el comprobante';
