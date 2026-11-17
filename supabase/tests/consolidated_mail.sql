@@ -1,0 +1,32 @@
+begin;
+DO $test$
+declare req uuid:=gen_random_uuid(); receipt jsonb; again jsonb; payload jsonb; result jsonb; t uuid; previous integer; next integer; ticket_count integer;
+begin
+ update pqr_private.consolidated_mail_config set enabled=true,activated_at=clock_timestamp()-interval '2 days',digest_cutoff=clock_timestamp()-interval '2 days' where singleton;
+ payload:=jsonb_build_object('requesterName','Prueba transaccional','requesterEmail','test@example.com','kind','PQR','client','KO tradicional','country','Honduras','rows',jsonb_build_array(jsonb_build_object('pdv','000000001','description','Prueba transaccional uno','priority','1'),jsonb_build_object('pdv','000000002','description','Prueba transaccional dos','priority','0')));
+ receipt:=public.pqr_submit_internal_batch(req,payload);
+ assert not(receipt ? 'error'),receipt::text;
+ assert receipt->>'batchCode' ~ '^ENV-[A-F0-9]{32}$','No hay consolidado';
+ assert jsonb_array_length(receipt->'tickets')=2,'Tickets individuales incompletos';
+ again:=public.pqr_submit_internal_batch(req,payload);
+ assert again=receipt,'El reintento cambió el comprobante';
+ assert (select count(*) from pqr_private.consolidated_mail_queue where logical_key like '%'||(receipt->>'batchCode'))=2,'No se agrupó en dos mensajes';
+ result:=public.pqr_lookup_submission(receipt->>'batchCode');
+ assert jsonb_array_length(result->'tickets')=2,'Consulta de tanda incompleta';
+ assert result::text not like '%test@example.com%','Correo expuesto en consulta';
+ t:=(receipt->'tickets'->0->>'id')::uuid;
+ update public.pqr_tickets set status='Cerrado',data=jsonb_set(data,'{status}','"Cerrado"') where id=t;
+ assert (select count(*) from pqr_private.mail_status_changes where ticket_id=t)=1,'No se capturó el cambio';
+ perform pqr_private.prepare_daily_digest(clock_timestamp()+interval '1 day');
+ assert (select count(*) from pqr_private.consolidated_mail_queue where logical_key like 'digest:%')=1,'Resumen diario incorrecto';
+ select count(*) into previous from pqr_private.consolidated_mail_queue;
+ perform pqr_private.prepare_daily_digest(clock_timestamp()+interval '1 day');
+ select count(*) into next from pqr_private.consolidated_mail_queue;
+ assert previous=next,'Se repitió el resumen';
+ perform pqr_private.prepare_daily_digest(clock_timestamp()+interval '2 days');
+ assert (select count(*) from pqr_private.consolidated_mail_queue)=previous,'Se generó un resumen sin novedades';
+ assert not has_function_privilege('anon','pqr_private.dispatch_consolidated_mail()','execute'),'Dispatcher público';
+ assert not has_function_privilege('anon','pqr_private.finalize_submission(uuid,jsonb)','execute'),'Finalizador público';
+end $test$;
+select 'CONSOLIDATED_MAIL_ROLLBACK_OK' as result;
+rollback;
