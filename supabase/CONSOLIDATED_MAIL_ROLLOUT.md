@@ -37,3 +37,8 @@ La aceptación HTTP puede preceder a un fallo de Outlook. La cola no dispone aú
 - `node --test test_internal_ticketing.cjs test_internal_bulk.cjs test_internal_excel_priority.cjs`.
 
 Prueba local de la migración de activación: reemplazar COMMIT final por ROLLBACK y comprobar el resultado. La activación real debe ejecutarse solo después de verificar el flujo dinámico y publicar el frontend compatible.
+
+## Activación verificada
+
+17 de noviembre de 2026: migraciones instaladas y cola activada. Verificación final: enabled=true, nuevo Cron activo y última ejecución succeeded; Cron anterior pausado; cero avisos internos antiguos pendientes. Las rutas PQR (cuatro destinatarios) y Redigitación/Edición (dos destinatarios) coinciden con las indicadas por el usuario.
+Prueba adicional: `supabase/tests/consolidated_mail_dispatch.sql` comprueba la llamada pg_net y el escape HTML en una transacción revertida, sin enviar otro correo.
