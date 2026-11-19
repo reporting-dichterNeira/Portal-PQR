@@ -39,7 +39,8 @@
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
-  const analystFilters = { country: 'all', study: 'all', month: 'all', origin: 'all', type: 'all', status: 'all', analyst: 'all' };
+  const analystFilters = { country: 'all', study: 'all', month: 'all', origin: 'all', type: 'all', status: 'all', analyst: 'all', requester: 'all' };
+  const redigitatorFilters = { type: 'all', status: 'all', requester: 'all' };
   const analystSelection = new Set();
   let analystBatchBusy = false;
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
@@ -373,9 +374,9 @@
   }
   function priorityLabel(value) { const v=String(value ?? ''); return v==='1'?'Prioritario':v==='0'?'No prioritario':v ? `Prioridad ${v}` : ''; }
   function ticketTable(cases, role) {
-    const selected = role === 'validador' ? 'all' : listTypes[role] || 'all';
+    const selected = role === 'validador' || (role === 'redigitador' && workspace === 'internal') ? 'all' : listTypes[role] || 'all';
     const visible = selected === 'all' ? cases : cases.filter(ticket => requestType(ticket) === selected);
-    const filter = role === 'validador' ? '' : `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
+    const filter = role === 'validador' || (role === 'redigitador' && workspace === 'internal') ? '' : `<div class="ticket-filter"><label>Tipo de solicitud<select data-type-filter="${role}"><option value="all" ${selected === 'all' ? 'selected' : ''}>Todos los tipos</option>${Object.entries(requestLabels).map(([kind, label]) => `<option value="${kind}" ${selected === kind ? 'selected' : ''}>${label}</option>`).join('')}</select></label><small>Mostrando ${visible.length} de ${cases.length} solicitudes</small></div>`;
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
     const multiple=role==='validador';
     const tools=multiple?analystBatchTools(visible):'';
@@ -403,16 +404,27 @@
     const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
     const cases = PQRReports.filterTickets(all, analystFilters);
     if(!cases.length)analystSelection.clear();
-    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons() + analystRedigitationButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
-    $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters));
+    $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons() + analystRedigitationButton() + internalExportButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters, { scope: workspace }));
     $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
     if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
     for (const key of Object.keys(analystFilters)) $('#analyst-'+key+'-filter')?.addEventListener('change', event => { analystFilters[key] = event.target.value; analyst(); });
     if(window.PQRAnalystBatch)updateAnalystSelection();
   }
+  function internalExportButton() {
+    return workspace==='internal'?'<button class="secondary" data-action="export-internal-cases">Descargar Excel</button>':'';
+  }
+  function redigitatorTickets() {
+    return scopeTickets().filter(ticket => ticket.redigitador === state.me.id || (ticket.redigitador && (state.me.isUniversal || state.users.some(user=>user.id===ticket.redigitador&&user.role==='universal'))));
+  }
   function redigitator() {
-    const cases = scopeTickets().filter(ticket => ticket.redigitador === state.me.id || (ticket.redigitador && (state.me.isUniversal || state.users.some(user=>user.id===ticket.redigitador&&user.role==='universal'))));
-    $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.')}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
+    const all = redigitatorTickets();
+    const cases = workspace==='internal' ? PQRReports.filterTickets(all, redigitatorFilters) : all;
+    $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.', internalExportButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
+    if(workspace==='internal') {
+      $('#view').querySelector('.metrics').insertAdjacentHTML('afterend',PQRReports.internalListFilters(all,redigitatorFilters));
+      for(const key of Object.keys(redigitatorFilters)) $('#redigitator-'+key+'-filter')?.addEventListener('change',event=>{redigitatorFilters[key]=event.target.value;redigitator();});
+    }
   }
   function dashboard() {
     if(window.PQRNavigation.homeRoute(location.hash)||['#solicitud-interna','#consultar-ticket'].includes(location.hash))return;
@@ -923,6 +935,7 @@
         workspace=button.dataset.scope==='internal'?'internal':'external';
         history.replaceState(null,'',workspace==='internal'?'#gestion':'#clientes');
         for(const key of Object.keys(analystFilters))analystFilters[key]='all';
+        for(const key of Object.keys(redigitatorFilters))redigitatorFilters[key]='all';
         for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
         auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
       }
@@ -951,6 +964,13 @@
       }
       if (type === 'detail' && ticket) return detail(ticket);
       if (type === 'edit-manual-pqr' && ticket) return editManualPqr(ticket);
+      if (type === 'reset-redigitator-filters' && state.me.role === 'redigitador' && workspace==='internal') { for(const key of Object.keys(redigitatorFilters)) redigitatorFilters[key]='all'; return redigitator(); }
+      if (type === 'export-internal-cases' && workspace==='internal' && ['validador','redigitador'].includes(state.me.role)) {
+        const all=state.me.role==='validador'?scopeTickets().map(ticket=>({...ticket,analystName:staffName('validador',ticket.validatorPersonId)})):redigitatorTickets();
+        const cases=PQRReports.filterTickets(all,state.me.role==='validador'?analystFilters:redigitatorFilters);
+        if(!cases.length)throw new Error('No hay solicitudes para descargar con los filtros actuales.');
+        PQRReports.excelCases(cases,state.users,state.staff);return;
+      }
       if (type === 'reset-analyst-filters' && state.me.role === 'validador') { for(const key of Object.keys(analystFilters)) analystFilters[key]='all'; return analyst(); }
       if (state.me.role === 'gerente' && type === 'refresh-audits') return await refreshAudits();
       if (state.me.role === 'gerente' && type === 'audit-dimension') {

@@ -39,3 +39,29 @@ test('Excel exports the internal requester without exposing contact email or los
  assert.equal(sheets[0][2][3],'Comercial de cliente');assert.equal(sheets[0][3][3],"'=SUM(A1:A2)");
  assert.doesNotMatch(JSON.stringify(sheets),/private@example.invalid/);
 });
+
+
+test('internal status and requester filters combine with type; Excel contains only matching rows',()=>{
+ const {reports,sheets}=setup();
+ const tickets=[{...ticket,pdv:'000123',description:'Detalle PQR'}, {...ticket,id:'rdg',requestType:'RDG',status:'Cerrado'}, {...ticket,id:'another',requesterName:'Otro comercial'}, {...ticket,id:'closed',status:'Cerrado'}];
+ const filters={status:'Radicado',requester:'María Comercial',type:'PQR'};
+ const chosen=reports.filterTickets(tickets,filters);
+ assert.deepEqual(chosen.map(t=>t.id),['internal']);
+ reports.excelCases(chosen);
+ const [headers,row]=sheets[0];
+ assert.equal(sheets[0].length,2);assert.equal(row[headers.indexOf('ID PDV')],'000123');assert.equal(row[headers.indexOf('Descripción')],'Detalle PQR');
+ assert.equal(row[headers.indexOf('Estado')],'Radicado');assert.equal(row[headers.indexOf('Comercial / solicitante')],'María Comercial');
+ for(const html of [reports.listFilters(tickets,{},filters,{scope:'internal'}),reports.internalListFilters(tickets,filters)]) {
+  assert.match(html,/Comercial \/ solicitante/);assert.match(html,/>Estado</);assert.match(html,/1 de 4 solicitudes/);
+ }
+ assert.match(reports.listFilters([],{}, {},{scope:'internal'}),/Comercial \/ solicitante/);
+ assert.doesNotMatch(reports.listFilters([{...ticket,scope:'external'}],{},{}),/Comercial \/ solicitante/);
+});
+
+test('requester options escape user input, deduplicate and allow missing names',()=>{
+ const {reports}=setup();
+ const tickets=[{...ticket,requesterName:' <img src=x> '},{...ticket,requesterName:'<img src=x>'},{...ticket,requesterName:' '}];
+ const html=reports.internalListFilters(tickets,{requester:'<img src=x>'});
+ assert.doesNotMatch(html,/<img/);assert.equal((html.match(/value="&lt;img src=x&gt;"/g)||[]).length,1);assert.match(html,/No indicado/);
+ assert.equal(reports.filterTickets(tickets,{requester:'No indicado'}).length,1);
+});

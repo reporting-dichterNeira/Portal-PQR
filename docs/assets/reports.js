@@ -20,7 +20,7 @@ window.PQRReports = (() => {
     }
     return [...counts].map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name,'es'));
   };
-  const filterTickets = (tickets,filters={}) => tickets.filter(t => Object.entries({country:t.country,study:t.client,month:t.reportingMonth||String(t.createdAt||'').slice(0,7),origin:t.origin||'platform',status:t.status,analyst:t.analystName||t.validatorPersonId||'',type:requestType(t)}).every(([key,value])=>!filters[key]||filters[key]==='all'||filters[key]===value));
+  const filterTickets = (tickets,filters={}) => tickets.filter(t => Object.entries({country:t.country,study:t.client,month:t.reportingMonth||String(t.createdAt||'').slice(0,7),origin:t.origin||'platform',status:t.status,analyst:t.analystName||t.validatorPersonId||'',type:requestType(t),requester:internalRequester(t)}).every(([key,value])=>!filters[key]||filters[key]==='all'||filters[key]===value));
   const breakdown = (tickets,field) => group(tickets,field).map(({name})=>{
     const own=tickets.filter(t=>String(t[field]||'Sin clasificar').trim()===name);
     const closed=own.filter(t=>closedStatuses.has(t.status)).length;
@@ -235,12 +235,18 @@ window.PQRReports = (() => {
     for(const cell of Object.values(ws))if(cell&&cell.t==='d')cell.z='dd/mm/yyyy hh:mm:ss';
     XLSX.utils.book_append_sheet(wb,ws,'Casos');XLSX.writeFile(wb,`PQR_casos_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
-  function listFilters(tickets,staff,filters={}) {
+  const requesterOptions = tickets => [...new Set(tickets.map(internalRequester))].sort((a,b)=>a.localeCompare(b,'es')).map(name=>[name,name]);
+  function internalListFilters(tickets,filters={}) {
+    const select=(key,label,values)=>`<label>${label}<select id="redigitator-${key}-filter"><option value="all">Todos</option>${values.map(([value,name])=>`<option value="${escapeHtml(value)}" ${filters[key]===value?'selected':''}>${escapeHtml(name)}</option>`).join('')}</select></label>`;
+    const statuses=[...new Set(tickets.map(t=>t.status).filter(Boolean))].sort().map(value=>[value,statusLabel(value)]);
+    return `<section class="card manager-global-filters" aria-label="Filtros de solicitudes internas">${select('type','Tipo de solicitud',Object.entries(requestLabels))}${select('status','Estado',statuses)}${select('requester','Comercial / solicitante',requesterOptions(tickets))}<div><button class="ghost" data-action="reset-redigitator-filters">Limpiar filtros</button><small role="status">${fmt(filterTickets(tickets,filters).length)} de ${fmt(tickets.length)} solicitudes</small></div></section>`;
+  }
+  function listFilters(tickets,staff,filters={},options={}) {
     const select=(key,label,values)=>`<label>${label}<select id="analyst-${key}-filter"><option value="all">Todos</option>${values.map(([value,name])=>`<option value="${escapeHtml(value)}" ${filters[key]===value?'selected':''}>${escapeHtml(name)}</option>`).join('')}</select></label>`;
     const values=field=>[...new Set(tickets.map(t=>t[field]).filter(Boolean))].sort().map(v=>[v,v]);
     const months=[...new Set(tickets.map(t=>t.reportingMonth||String(t.createdAt||'').slice(0,7)).filter(Boolean))].sort().reverse().map(v=>[v,v]);
     const analysts=[...new Map(tickets.map(t=>[t.analystName||t.validatorPersonId,t.analystName||staff.validators?.find(v=>v.id===t.validatorPersonId)?.name]).filter(([id,name])=>id&&name)).entries()];
-    return `<section class="card manager-global-filters" aria-label="Filtros de Analistas">${select('country','País',values('country'))}${select('study','Estudio',values('client'))}${select('month','Mes',months)}${select('origin','Origen',[['historical','Histórico (Excel)'],['platform','Plataforma']])}${select('type','Tipo de solicitud',Object.entries(requestLabels))}${select('status','Estado',values('status').map(([v])=>[v,statusLabel(v)]))}${select('analyst','Analista de PQR',analysts)}<div><button class="ghost" data-action="reset-analyst-filters">Limpiar filtros</button><small role="status">${fmt(filterTickets(tickets,filters).length)} de ${fmt(tickets.length)} solicitudes</small></div><p class="sub full">Los filtros y contadores corresponden a tu bandeja de PQR. Mes = fecha de radicación; el mes de Ola y los históricos de Excel se consultan en Gerencia. Las redigitaciones directas y ediciones se atienden en Redigitación.</p></section>`;
+    return `<section class="card manager-global-filters" aria-label="Filtros de Analistas">${select('country','País',values('country'))}${select('study','Estudio',values('client'))}${select('month','Mes',months)}${select('origin','Origen',[['historical','Histórico (Excel)'],['platform','Plataforma']])}${select('type','Tipo de solicitud',Object.entries(requestLabels))}${select('status','Estado',values('status').map(([v])=>[v,statusLabel(v)]))}${select('analyst','Analista de PQR',analysts)}${showRequester(tickets,options)?select('requester','Comercial / solicitante',requesterOptions(tickets)):''}<div><button class="ghost" data-action="reset-analyst-filters">Limpiar filtros</button><small role="status">${fmt(filterTickets(tickets,filters).length)} de ${fmt(tickets.length)} solicitudes</small></div><p class="sub full">Los filtros y contadores corresponden a tu bandeja de PQR. Mes = fecha de radicación; el mes de Ola y los históricos de Excel se consultan en Gerencia. Las redigitaciones directas y ediciones se atienden en Redigitación.</p></section>`;
   }
-  return {statusLabel,summarize,filterTickets,monthlyTrend,render,listFilters,pdf,excelSummary,excelCases};
+  return {statusLabel,summarize,filterTickets,monthlyTrend,render,listFilters,internalListFilters,pdf,excelSummary,excelCases};
 })();
