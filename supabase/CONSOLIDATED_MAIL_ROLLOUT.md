@@ -46,3 +46,9 @@ Prueba adicional: `supabase/tests/consolidated_mail_dispatch.sql` comprueba la l
 ## Códigos breves
 
 Los consolidados usan ENV-000001, con seis dígitos consecutivos. Los códigos largos anteriores se conservan como alias de consulta. La migración conserva las claves de deduplicación de avisos y no reenvía correos ya enviados. Verificación del 17/11/2026: envío individual inactivo, cero avisos individuales internos pendientes; envío consolidado activo.
+
+## Resumen diario en tabla
+
+19 de noviembre de 2026: el resumen HTML contiene Radicado, ID de PDV, Estado anterior, Estado actual y Respuesta. El estado anterior es el inicio del periodo; el actual es el último cambio incluido. Conserva una fila por ticket, un correo por solicitante y el corte de las 17:00 de Bogotá. Los casos Cerrado/No Aplica aparecen en verde con FINALIZADO.
+Las respuestas futuras se guardan junto al cambio de estado; incluyen la respuesta, notas de redigitación, edición y verificación disponibles. Para cambios previos a esta actualización se usa la respuesta disponible en el caso. Todos los textos se escapan antes de incorporarlos al HTML. Los otros avisos mantienen su formato anterior.
+Prueba transaccional con rollback: supabase/tests/daily_digest_html_table.sql; valida agrupación, estados inicial/final, última respuesta, escape HTML, colores, ausencia de duplicados y resúmenes vacíos.
