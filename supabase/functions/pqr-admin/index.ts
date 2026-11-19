@@ -56,8 +56,10 @@ Deno.serve(async (request) => {
   const email = `${username}@portal-pqr.invalid`;
 
   if (action === 'create') {
-    if (!validUsername || name.length < 3 || !['admin', 'gerente', 'validador', 'redigitador', 'comercial', 'universal'].includes(role)
+    if (!validUsername || name.length < 3 || !['admin', 'gerente', 'validador', 'redigitador', 'comercial', 'universal', 'campo'].includes(role)
       || password.length < 8) return reply(origin, { error: 'Usuario, nombre o rol inválidos, o contraseña con menos de 8 caracteres' }, 400);
+    const fieldCountry=role==='campo'?String(input.fieldCountry??''):null;
+    if(role==='campo'&&!['Costa Rica','El Salvador','Guatemala','Honduras','Nicaragua','Panamá'].includes(fieldCountry!))return reply(origin,{error:'Selecciona el país de Campo'},400);
     if (['validador', 'redigitador'].includes(role)) {
       const { data: existing } = await admin.from('pqr_profiles').select('id').eq('role', role).limit(1);
       if (existing?.length) return reply(origin, { error: 'Ya existe la cuenta compartida de esta área' }, 409);
@@ -65,7 +67,7 @@ Deno.serve(async (request) => {
     const { data: created, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
     if (error || !created.user) return reply(origin, { error: error?.message ?? 'No se pudo crear la cuenta' }, 400);
     const { error: profileError } = await admin.from('pqr_profiles').insert({
-      id: created.user.id, username, name, role, active: true,
+      id: created.user.id, username, name, role, active: true, field_country:fieldCountry,
     });
     if (profileError) {
       await admin.auth.admin.deleteUser(created.user.id);

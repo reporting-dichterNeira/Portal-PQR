@@ -29,7 +29,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const usernameKey = value => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const fmt = value => value ? new Date(value).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—';
-  const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial', universal: 'Universal' };
+  const roles = { admin: 'Administración', gerente: 'Gerencia', validador: 'Analistas de PQR', redigitador: 'Redigitación', comercial: 'Comercial', universal: 'Universal', campo: 'Campo' };
   const clients = ['KO tradicional', 'KO moderno', 'Lindley', 'P&G', 'CBC', 'Gloria', 'Heineken', 'Fifco', 'ABI', 'Otros'];
   const countries = ['Colombia', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Panamá', 'Perú', 'Bolivia', 'Paraguay', 'Costa Rica', 'Ecuador', 'Chile', 'República Dominicana'];
   const standardAreas = ['Campo', 'Validación', 'IT', 'Comercial'];
@@ -38,9 +38,10 @@
   const maxAttachmentBytes = 10 * 1024 * 1024;
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
   const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
-  const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all' };
+  const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all', campo: 'all' };
   const analystFilters = { country: 'all', study: 'all', month: 'all', origin: 'all', type: 'all', status: 'all', analyst: 'all', requester: 'all' };
   const redigitatorFilters = { type: 'all', status: 'all', requester: 'all' };
+  let analystSection = 'requests';
   const analystSelection = new Set();
   let analystBatchBusy = false;
   const requestType = ticket => ticket.requestType || (ticket.code?.startsWith('EDC-') ? 'EDC' : ticket.directRedigitation || ticket.code?.startsWith('RDG-') ? 'RDG' : 'PQR');
@@ -283,7 +284,7 @@
     const { data: session } = await db.auth.getSession();
     if(location.hash!==loadRoute)return;
     if (!session.session) { window.PQRUniversal.reset(); state.me = null; renderLogin(); return; }
-    const {data:identity,error:identityError}=await db.from('pqr_profiles').select('id,username,name,role,active').eq('id',session.session.user.id).single();
+    const {data:identity,error:identityError}=await db.from('pqr_profiles').select('id,username,name,role,active,field_country').eq('id',session.session.user.id).single();
     if(version!==loadVersion||location.hash!==loadRoute)return;
     if(identityError)throw identityError;
     if(!identity?.active){window.PQRUniversal.reset();await db.auth.signOut();state.me=null;renderLogin('Tu cuenta no está activa.');return;}
@@ -295,7 +296,7 @@
       $('#app').innerHTML=window.PQRUniversal.menu(selectedIdentity,esc,window.PQRNavigation.icon);return;
     }
     const queries = await Promise.all([
-      db.from('pqr_profiles').select('id,username,name,role,active').order('name'),
+      db.from('pqr_profiles').select('id,username,name,role,active,field_country').order('name'),
       db.from('pqr_staff').select('*').order('name'),
       db.from('pqr_tips').select('name,suggested_area').order('name'),
       db.from('pqr_tickets').select('id,deleted_at,updated_at,data').order('created_at', { ascending: false }),
@@ -369,6 +370,7 @@
     if (role === 'comercial') return commercial();
     if (role === 'validador') return analyst();
     if (role === 'redigitador') return redigitator();
+    if (role === 'campo') return fieldQueue();
     if (role === 'gerente') return dashboard();
     return admin();
   }
@@ -380,7 +382,7 @@
     if (!visible.length) return `${filter}<section class="card empty">No hay solicitudes de este tipo en la bandeja.</section>`;
     const multiple=role==='validador';
     const tools=multiple?analystBatchTools(visible):'';
-    return `${filter}${tools}<section class="card table-wrap"><table class="table ticket-table"><thead><tr>${multiple?'<th class="batch-check-cell"><input type="checkbox" id="analyst-select-visible" aria-label="Seleccionar hasta 100 PQR visibles pendientes de dictamen"></th>':''}<th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador'].includes(role) ? '<th>Plazo SLA · 48 h (lun–vie)</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr>${multiple?`<td class="batch-check-cell"><input type="checkbox" data-batch-ticket="${esc(ticket.id)}" aria-label="Seleccionar ${esc(ticket.code)}" ${analystSelection.has(ticket.id)?'checked':''} ${window.PQRAnalystBatch.eligible(ticket)?'':'disabled title="Solo PQR pendientes de dictamen"'}></td>`:''}<td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${priorityLabel(ticket.priority)?`<small><strong>${esc(priorityLabel(ticket.priority))}</strong></small>`:''}${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
+    return `${filter}${tools}<section class="card table-wrap"><table class="table ticket-table"><thead><tr>${multiple?'<th class="batch-check-cell"><input type="checkbox" id="analyst-select-visible" aria-label="Seleccionar hasta 100 PQR visibles pendientes de dictamen"></th>':''}<th>Radicado</th><th>Cliente / PDV</th><th>Estado</th><th>Asignación</th><th>Auditoría</th>${['validador', 'redigitador', 'campo'].includes(role) ? '<th>Plazo SLA · 48 h (lun–vie)</th>' : ''}<th>Acciones</th></tr></thead><tbody>${visible.map(ticket => `<tr>${multiple?`<td class="batch-check-cell"><input type="checkbox" data-batch-ticket="${esc(ticket.id)}" aria-label="Seleccionar ${esc(ticket.code)}" ${analystSelection.has(ticket.id)?'checked':''} ${window.PQRAnalystBatch.eligible(ticket)?'':'disabled title="Solo PQR pendientes de dictamen"'}></td>`:''}<td><strong>${esc(ticket.code)}</strong> <span class="badge direct-badge">${requestLabels[requestType(ticket)]}</span><br><small>${fmt(ticket.createdAt)}</small>${priorityLabel(ticket.priority)?`<small><strong>${esc(priorityLabel(ticket.priority))}</strong></small>`:''}${ticket.requesterName?`<small>Solicitante: ${esc(ticket.requesterName)}</small>`:''}${ticket.externalTicketId?`<small>Ticket de origen: ${esc(ticket.externalTicketId)}</small>`:''}</td><td>${esc(ticket.client)}<br><small>${esc(ticket.pdv || 'Sin PDV')} · ${esc(ticket.country)}</small></td><td>${badge(ticket.status)}${ticket.redigitType ? `<br><small>${requestType(ticket) === 'EDC' ? 'Edición de' : 'Redigitación de'} ${esc(ticket.redigitType.toLowerCase())}</small>` : ''}</td><td><small>${requestType(ticket) === 'PQR' ? `Analista: ${esc(staffName('validador', ticket.validatorPersonId) || 'Sin asignar')}<br>` : ''}Redig: ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId) || 'Sin asignar')}</small></td><td>${requestType(ticket) === 'EDC' ? esc(ticket.auditOriginal || '—') : ticket.audit ? `<small>ID: ${esc(ticket.auditOriginal || '—')}<br>Nueva: ${esc(ticket.audit)}</small>` : esc(ticket.auditOriginal || '—')}</td>${['validador', 'redigitador', 'campo'].includes(role) ? `<td>${due(ticket, role)}</td>` : ''}<td><div class="actions"><button class="ghost" data-action="detail" data-id="${ticket.id}">Detalle</button>${ticketActions(ticket, role)}</div></td></tr>`).join('')}</tbody></table></section>`;
   }
   function ticketActions(ticket, role) {
     if (role === 'admin') return `<button class="danger" data-action="delete" data-id="${ticket.id}">Eliminar</button>`;
@@ -388,11 +390,12 @@
       let result = canEditManualPqr(ticket) ? `<button class="ghost" data-action="edit-manual-pqr" data-id="${esc(ticket.id)}">Editar radicación</button>` : '';
       if (['Radicado', 'Reabierto', 'En Validación', 'Pendiente de Verificación'].includes(ticket.status)) result += `<button class="secondary" data-action="assign-validator" data-id="${ticket.id}">${ticket.validatorPersonId ? 'Reasignar' : 'Asignar'}</button>`;
       if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ['En Validación', 'Reabierto'].includes(ticket.status)) result += `<button class="primary" data-action="dictate" data-id="${ticket.id}">Dictaminar</button>`;
-      if (requestType(ticket) === 'PQR' && ticket.validatorPersonId && ticket.status === 'Pendiente de Verificación') result += `<button class="primary" data-action="verify" data-id="${ticket.id}">Verificar</button>`;
+      if (requestType(ticket) !== 'EDC' && ticket.status === 'Pendiente de Verificación') result += `<button class="primary" data-action="verify" data-id="${ticket.id}">Verificar</button>`;
       if (requestType(ticket) === 'PQR' && ['Cerrado', 'No Aplica'].includes(ticket.status)) result += `<button class="danger" data-action="reopen" data-id="${ticket.id}">Reabrir</button>`;
       return result;
     }
-    if (role === 'redigitador' && (['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status) || (requestType(ticket) === 'EDC' && ticket.status === 'Pendiente de Verificación'))) return `${ticket.status !== 'Pendiente de Verificación' ? `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Asignar edición' : 'Asignar'}</button>` : ''}${ticket.redigitatorPersonId || ticket.fieldRedigitatorName ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Confirmar edición' : 'Redigitar'}</button>` : ''}`;
+    if (role === 'campo') return ['Pendiente de Redigitación','Devuelto'].includes(ticket.status)?`<button class="primary" data-action="field-complete" data-id="${esc(ticket.id)}">Confirmar redigitación</button>`:'';
+    if (role === 'redigitador' && (['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status) || (requestType(ticket) === 'EDC' && ticket.status === 'Pendiente de Verificación'))) return `${ticket.status !== 'Pendiente de Verificación' ? `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Asignar edición' : 'Asignar'}</button>` : ''}${!ticket.fieldAccountId && (ticket.redigitatorPersonId || ticket.fieldRedigitatorName) ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Confirmar edición' : 'Redigitar'}</button>` : ''}`;
     if (role === 'comercial' && ticket.status === 'Cerrado' && !ticket.feedback) return `<button class="secondary" data-action="feedback" data-id="${ticket.id}">Calificar</button>`;
     return '';
   }
@@ -401,15 +404,27 @@
     $('#view').innerHTML = `${header('Mis solicitudes', 'Radica PQR, redigitaciones o ediciones de auditoría.', '<button class="secondary" data-action="new-edit">Solicitar edición</button><button class="secondary" data-action="new-direct">Solicitar redigitación directa</button><button class="primary" data-action="new-ticket">Nueva PQR</button>')}<section class="metrics">${metric('Radicadas', cases.length)}${metric('En gestión', cases.filter(ticket => !['Cerrado', 'No Aplica'].includes(ticket.status)).length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'comercial')}`;
   }
   function analyst() {
-    const all = scopeTickets().filter(ticket => workspace==='internal'||requestType(ticket) === 'PQR').map(ticket => ({ ...ticket, analystName: staffName('validador', ticket.validatorPersonId) }));
+    const all = analystTickets();
     const cases = PQRReports.filterTickets(all, analystFilters);
     if(!cases.length)analystSelection.clear();
     $('#view').innerHTML = `${header('Analistas de PQR', 'Asigna, dictamina, verifica redigitaciones y cierra casos.', manualPqrButtons() + analystRedigitationButton() + internalExportButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Sin asignar', cases.filter(ticket => !ticket.validatorPersonId && ticket.status === 'Radicado').length)}${metric('Por verificar', cases.filter(ticket => ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ['Cerrado', 'No Aplica'].includes(ticket.status)).length)}</section>${ticketTable(cases, 'validador')}`;
+    $('#view').querySelector('.metrics').insertAdjacentHTML('beforebegin',`<nav class="manager-tabs" aria-label="Hojas de Analistas"><button data-action="analyst-section" data-section="requests" class="${analystSection==='requests'?'active':''}">Solicitudes</button><button data-action="analyst-section" data-section="verification" class="${analystSection==='verification'?'active':''}">Aprobación de redigitaciones (${scopeTickets().filter(t=>t.status==='Pendiente de Verificación'&&requestType(t)!=='EDC').length})</button></nav>`);
     $('#view').querySelector('.metrics').insertAdjacentHTML('afterend', PQRReports.listFilters(all, state.staff, analystFilters, { scope: workspace }));
     $('#view h1').textContent=`Analistas · ${window.PQRScopes.label(workspace)}`;
     if(workspace==='internal')$('#view > .topline .sub').textContent='Seguimiento interno separado. Las PQR pasan por Analistas; redigitaciones directas y ediciones se atienden en Redigitación.';
     for (const key of Object.keys(analystFilters)) $('#analyst-'+key+'-filter')?.addEventListener('change', event => { analystFilters[key] = event.target.value; analyst(); });
     if(window.PQRAnalystBatch)updateAnalystSelection();
+  }
+  function analystTickets() {
+    return scopeTickets().filter(t=>analystSection==='verification' ? t.status==='Pendiente de Verificación'&&requestType(t)!=='EDC' : (workspace==='internal'||requestType(t)==='PQR')&&!(t.status==='Pendiente de Verificación'&&requestType(t)!=='EDC')).map(t=>({...t,analystName:staffName('validador',t.validatorPersonId)}));
+  }
+  function fieldQueue() {
+    const cases=scopeTickets().filter(t=>t.fieldAccountId===state.me.id&&t.country===state.me.field_country);
+    $('#view').innerHTML=`${header('Campo · '+state.me.field_country,'Redigita las auditorías enviadas por Validación. Al confirmar, Analistas de PQR dará el aprobado final.')}<section class="metrics">${metric('Asignadas',cases.length)}${metric('Pendientes',cases.filter(t=>['Pendiente de Redigitación','Devuelto'].includes(t.status)).length)}${metric('En aprobación PQR',cases.filter(t=>t.status==='Pendiente de Verificación').length)}${metric('Cerradas',cases.filter(t=>t.status==='Cerrado').length)}</section>${ticketTable(cases,'campo')}`;
+  }
+  function completeField(ticket) {
+    modal('Confirmar redigitación · '+ticket.code,`<p>El caso volverá a Analistas de PQR para aprobación final.</p><form id="action-form" class="stack"><label>Nueva auditoría<input name="audit" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric required maxlength="80"></label><label>Detalle de la redigitación<textarea name="notes" required minlength="5" maxlength="12000"></textarea></label><button class="primary">Enviar a aprobación PQR</button></form>`);
+    const form=$('#action-form');form.onsubmit=async event=>{event.preventDefault();await submit(form,()=>action('field_complete',ticket.id,formData(form)));};
   }
   function internalExportButton() {
     return workspace==='internal'?'<button class="secondary" data-action="export-internal-cases">Descargar Excel</button>':'';
@@ -829,17 +844,17 @@
   function assignRedigit(ticket) {
     const people = state.staff.redigitators.filter(person => person.active);
     const edition = requestType(ticket) === 'EDC';
-    modal(`${edition ? 'Asignar edición' : 'Asignar redigitación'} · ${ticket.code}`, `<form id="action-form" class="stack">${edition ? '<div class="notice">Las ediciones solo pueden ser gestionadas por Validación.</div><input type="hidden" name="redigitType" value="Validación">' : '<label>Tipo<select name="redigitType"><option>Validación</option><option>Campo</option></select></label>'}<div id="validation-panel"><label>Redigitador de Validación<select name="personId" required><option value="">Selecciona una persona</option>${people.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select></label></div>${edition ? '' : '<div id="field-panel" class="hide"><label>Persona de Campo<input name="fieldPerson" maxlength="100" placeholder="Nombre y apellido"></label></div>'}<div class="actions"><button class="primary">Confirmar responsable</button></div></form>`);
+    modal(`${edition ? 'Asignar edición' : 'Asignar redigitación'} · ${ticket.code}`, `<form id="action-form" class="stack">${edition ? '<div class="notice">Las ediciones solo pueden ser gestionadas por Validación.</div><input type="hidden" name="redigitType" value="Validación">' : '<label>Tipo<select name="redigitType"><option>Validación</option><option>Campo</option></select></label>'}<div id="validation-panel"><label>Redigitador de Validación<select name="personId" required><option value="">Selecciona una persona</option>${people.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select></label></div>${edition ? '' : '<div id="field-panel" class="hide"><p>Se enviará automáticamente a la cuenta de Campo del país de esta solicitud. Campo registrará la nueva auditoría y Analistas dará la aprobación final.</p></div>'}<div class="actions"><button class="primary">Confirmar responsable</button></div></form>`);
     const form = $('#action-form');
     if (!edition) {
-      form.elements.redigitType.onchange = () => { const field = form.elements.redigitType.value === 'Campo'; $('#field-panel').classList.toggle('hide', !field); $('#validation-panel').classList.toggle('hide', field); form.elements.fieldPerson.required = field; form.elements.personId.required = !field; };
+      form.elements.redigitType.onchange = () => { const field = form.elements.redigitType.value === 'Campo'; $('#field-panel').classList.toggle('hide', !field); $('#validation-panel').classList.toggle('hide', field); form.elements.personId.required = !field; };
       form.elements.redigitType.onchange();
     }
     form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('assign_redigit', ticket.id, formData(form))); };
   }
   function redigit(ticket) {
     const edition = requestType(ticket) === 'EDC';
-    modal(`${edition ? 'Confirmar edición' : 'Redigitar'} · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack">${edition ? '<label>¿Se editó la auditoría?<select name="edited" required><option value="">Selecciona una respuesta</option><option value="yes">Sí, se editó</option><option value="no">No se editó</option></select></label><label>Comentario para Comercial<textarea name="comment" minlength="5" required></textarea></label>' : '<label>Nuevo número de auditoría<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label>'}<div class="actions"><button class="primary">${edition ? 'Finalizar y avisar a Comercial' : ticket.directRedigitation ? 'Registrar y cerrar' : 'Enviar a verificación'}</button></div></form>`);
+    modal(`${edition ? 'Confirmar edición' : 'Redigitar'} · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack">${edition ? '<label>¿Se editó la auditoría?<select name="edited" required><option value="">Selecciona una respuesta</option><option value="yes">Sí, se editó</option><option value="no">No se editó</option></select></label><label>Comentario para Comercial<textarea name="comment" minlength="5" required></textarea></label>' : '<label>Nuevo número de auditoría<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label>'}<div class="actions"><button class="primary">${edition ? 'Finalizar y avisar a Comercial' : 'Enviar a aprobación PQR'}</button></div></form>`);
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action(edition ? 'edit_complete' : 'redigit', ticket.id, formData(form))); };
   }
   function verify(ticket) {
@@ -865,8 +880,9 @@
     }); };
   }
   function userForm(person) {
-    modal(person ? `Cuenta · ${person.name}` : 'Nuevo usuario', `<form id="action-form" class="stack"><label>Nombre<input name="name" required minlength="3" value="${esc(person?.name || '')}" ${person ? 'disabled' : ''}></label><label>Usuario<input name="username" required minlength="3" maxlength="32" autocomplete="username" value="${esc(person?.username || '')}"><small>Se escribe sin tildes ni ñ; el portal las convierte automáticamente.</small></label>${person ? '' : `<label>Rol<select name="role">${Object.entries(roles).filter(([role]) => role !== 'admin').map(([role, label]) => `<option value="${role}">${esc(label)}</option>`).join('')}</select></label>`}<label>${person ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input name="password" type="password" autocomplete="new-password" minlength="8" ${person ? '' : 'required'}><small>Mínimo 8 caracteres. No la compartas por correo.</small></label><div class="actions"><button class="primary">${person ? 'Guardar cambios' : 'Crear cuenta'}</button></div></form>`);
+    modal(person ? `Cuenta · ${person.name}` : 'Nuevo usuario', `<form id="action-form" class="stack"><label>Nombre<input name="name" required minlength="3" value="${esc(person?.name || '')}" ${person ? 'disabled' : ''}></label><label>Usuario<input name="username" required minlength="3" maxlength="32" autocomplete="username" value="${esc(person?.username || '')}"><small>Se escribe sin tildes ni ñ; el portal las convierte automáticamente.</small></label>${person ? '' : `<label>Rol<select name="role">${Object.entries(roles).filter(([role]) => role !== 'admin').map(([role, label]) => `<option value="${role}">${esc(label)}</option>`).join('')}</select></label><label id="user-field-country" class="hide">País de Campo<select name="fieldCountry">${options(['Costa Rica','El Salvador','Guatemala','Honduras','Nicaragua','Panamá'])}</select></label>`}<label>${person ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input name="password" type="password" autocomplete="new-password" minlength="8" ${person ? '' : 'required'}><small>Mínimo 8 caracteres. No la compartas por correo.</small></label><div class="actions"><button class="primary">${person ? 'Guardar cambios' : 'Crear cuenta'}</button></div></form>`);
     const form = $('#action-form');
+    if(!person){const syncCountry=()=>{const field=form.elements.role.value==='campo';$('#user-field-country').classList.toggle('hide',!field);form.elements.fieldCountry.required=field;};form.elements.role.addEventListener('change',syncCountry);syncCountry();}
     form.elements.username.addEventListener('blur', () => { form.elements.username.value = usernameKey(form.elements.username.value); });
     form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => {
       const values = formData(form);
@@ -934,7 +950,7 @@
         analystSelection.clear();
         workspace=button.dataset.scope==='internal'?'internal':'external';
         history.replaceState(null,'',workspace==='internal'?'#gestion':'#clientes');
-        for(const key of Object.keys(analystFilters))analystFilters[key]='all';
+        analystSection='requests';for(const key of Object.keys(analystFilters))analystFilters[key]='all';
         for(const key of Object.keys(redigitatorFilters))redigitatorFilters[key]='all';
         for(const key of Object.keys(managerState))if(!['view','auditDimension'].includes(key))managerState[key]='all';
         auditLookup=window.PQRAudits?.empty();renderView();if(state.me.role==='gerente')await refreshAudits();return;
@@ -962,11 +978,13 @@
         if (unread.length) await db.from('pqr_notifications').update({ read: true }).in('id', unread);
         return;
       }
+      if(type==='analyst-section'&&state.me.role==='validador'){analystSection=button.dataset.section==='verification'?'verification':'requests';analystSelection.clear();for(const key of Object.keys(analystFilters))analystFilters[key]='all';return analyst();}
+      if(type==='field-complete'&&state.me.role==='campo'&&ticket)return completeField(ticket);
       if (type === 'detail' && ticket) return detail(ticket);
       if (type === 'edit-manual-pqr' && ticket) return editManualPqr(ticket);
       if (type === 'reset-redigitator-filters' && state.me.role === 'redigitador' && workspace==='internal') { for(const key of Object.keys(redigitatorFilters)) redigitatorFilters[key]='all'; return redigitator(); }
       if (type === 'export-internal-cases' && workspace==='internal' && ['validador','redigitador'].includes(state.me.role)) {
-        const all=state.me.role==='validador'?scopeTickets().map(ticket=>({...ticket,analystName:staffName('validador',ticket.validatorPersonId)})):redigitatorTickets();
+        const all=state.me.role==='validador'?analystTickets():redigitatorTickets();
         const cases=PQRReports.filterTickets(all,state.me.role==='validador'?analystFilters:redigitatorFilters);
         if(!cases.length)throw new Error('No hay solicitudes para descargar con los filtros actuales.');
         PQRReports.excelCases(cases,state.users,state.staff);return;
