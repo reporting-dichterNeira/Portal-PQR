@@ -924,6 +924,23 @@
     modal('Cambiar mi contraseña', '<form id="action-form" class="stack"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required><small>Mínimo 8 caracteres.</small></label><div class="actions"><button class="primary">Guardar contraseña</button></div></form>');
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.auth.updateUser({ password: formData(form).password }); if (error) throw error; }); };
   }
+  document.addEventListener('change',event=>{
+    const prefix=event.target?.dataset?.statusFilter;
+    const expected={analyst:'validador',redigitator:'redigitador',manager:'gerente'};
+    if(!prefix||workspace!=='internal'||state.me?.role!==expected[prefix])return;
+    event.stopPropagation();
+    const filters=prefix==='analyst'?analystFilters:prefix==='redigitator'?redigitatorFilters:managerState;
+    filters.status=PQRReports.toggleStatus(filters.status,event.target.value,event.target.checked);
+    renderView();
+    const control=$('#'+prefix+'-status-filter');if(control)control.open=true;
+  },true);
+  document.addEventListener('click',event=>{
+    document.querySelectorAll('details.status-multiselect[open]').forEach(control=>{if(!control.contains(event.target))control.open=false;});
+  });
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='Escape')return;
+    document.querySelectorAll('details.status-multiselect[open]').forEach(control=>{control.open=false;control.querySelector('summary').focus();});
+  });
   document.addEventListener('change', event => {
     if(state.me?.role==='validador'&&(event.target?.dataset?.batchTicket||event.target?.id==='analyst-select-visible')){
       if(event.target.id==='analyst-select-visible'){analystSelection.clear();if(event.target.checked)Array.from(document.querySelectorAll('[data-batch-ticket]:not(:disabled)')).slice(0,window.PQRAnalystBatch.MAX).forEach(box=>analystSelection.add(box.dataset.batchTicket));}

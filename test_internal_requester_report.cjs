@@ -65,3 +65,22 @@ test('requester options escape user input, deduplicate and allow missing names',
  assert.doesNotMatch(html,/<img/);assert.equal((html.match(/value="&lt;img src=x&gt;"/g)||[]).length,1);assert.match(html,/No indicado/);
  assert.equal(reports.filterTickets(tickets,{requester:'No indicado'}).length,1);
 });
+
+
+test('several internal statuses form a union and combine with country and requester in exports',()=>{
+ const {reports,sheets}=setup();
+ const data=[{...ticket,status:'Radicado',pdv:'000001'},{...ticket,id:'review',status:'En Validación',pdv:'000002'},{...ticket,id:'closed',status:'Cerrado'},{...ticket,id:'other-country',country:'Honduras',status:'Radicado'}];
+ const filters={status:['Radicado','En Validación'],country:'Guatemala',requester:'María Comercial'};
+ const selected=reports.filterTickets(data,filters);assert.deepEqual(selected.map(t=>t.id),['internal','review']);
+ reports.excelCases(selected);assert.equal(sheets[0].length,3);const h=sheets[0][0];assert.deepEqual(sheets[0].slice(1).map(r=>r[h.indexOf('Estado')]),['Radicado','En revisión']);
+ for(const html of [reports.listFilters(data,{},filters,{scope:'internal'}),reports.internalListFilters(data,filters),reports.render(data,[],{},{...filters,scope:'internal'})]) {
+  assert.match(html,/2 estados seleccionados/);assert.match(html,/type="checkbox"[^>]*value="Radicado" checked/);assert.match(html,/type="checkbox"[^>]*value="En Validación" checked/);
+ }
+});
+
+test('unchecking and selecting all statuses clears restrictions without losing other filters',()=>{
+ const {reports}=setup();let current=reports.toggleStatus('all','Radicado',true);current=reports.toggleStatus(current,'En Validación',true);
+ assert.deepEqual(Array.from(current),['Radicado','En Validación']);current=reports.toggleStatus(current,'Radicado',false);assert.deepEqual(Array.from(current),['En Validación']);
+ assert.equal(reports.toggleStatus(current,'En Validación',false),'all');assert.equal(reports.toggleStatus(current,'all',true),'all');
+ assert.equal(reports.filterTickets([ticket,{...ticket,country:'Honduras'}],{status:'all',country:'Guatemala'}).length,1);
+});
