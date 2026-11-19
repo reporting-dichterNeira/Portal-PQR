@@ -52,3 +52,7 @@ Los consolidados usan ENV-000001, con seis dígitos consecutivos. Los códigos l
 19 de noviembre de 2026: el resumen HTML contiene Radicado, ID de PDV, Estado anterior, Estado actual y Respuesta. El estado anterior es el inicio del periodo; el actual es el último cambio incluido. Conserva una fila por ticket, un correo por solicitante y el corte de las 17:00 de Bogotá. Los casos Cerrado/No Aplica aparecen en verde con FINALIZADO.
 Las respuestas futuras se guardan junto al cambio de estado; incluyen la respuesta, notas de redigitación, edición y verificación disponibles. Para cambios previos a esta actualización se usa la respuesta disponible en el caso. Todos los textos se escapan antes de incorporarlos al HTML. Los otros avisos mantienen su formato anterior.
 Prueba transaccional con rollback: supabase/tests/daily_digest_html_table.sql; valida agrupación, estados inicial/final, última respuesta, escape HTML, colores, ausencia de duplicados y resúmenes vacíos.
+
+## Copia de seguimiento en todos los avisos
+
+19 de noviembre de 2026: las direcciones de internal_mail_copies se añaden automáticamente a las copias de cada aviso nuevo de la cola (recepción al solicitante, equipo, remisión y resumen diario). Se normalizan y se excluyen las direcciones que ya son destinatarias principales. La acción de Outlook tiene CC = triggerBody()?['pqr']?['cc']; To usa solo los destinatarios principales. Los correos siguen agrupados; no se reenvía el histórico. Prueba con rollback: supabase/tests/all_internal_mail_monitor_copy.sql.
