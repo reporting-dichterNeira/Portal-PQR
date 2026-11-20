@@ -84,3 +84,24 @@ test('unchecking and selecting all statuses clears restrictions without losing o
  assert.equal(reports.toggleStatus(current,'En Validación',false),'all');assert.equal(reports.toggleStatus(current,'all',true),'all');
  assert.equal(reports.filterTickets([ticket,{...ticket,country:'Honduras'}],{status:'all',country:'Guatemala'}).length,1);
 });
+
+test('management requester filter includes every request type and exports the full matching dataset',()=>{
+ const {reports,sheets}=setup();
+ const tickets=Array.from({length:205},(_,i)=>({...ticket,id:String(i),pdv:String(1000+i),requestType:['PQR','RDG','EDC'][i%3]}));
+ tickets.push({...ticket,id:'other',requesterName:'Otro comercial'});
+ for(const view of ['overview','details','pending']){
+  const html=reports.render(tickets,[],{},{scope:'internal',view,requester:'María Comercial'});
+  assert.match(html,/id="manager-requester-filter"/);
+  assert.match(html,/value="María Comercial" selected/);
+  assert.match(html,/205 de 206 solicitudes/);
+ }
+ const selected=reports.filterTickets(tickets,{requester:'María Comercial'});
+ reports.excelCases(selected);
+ assert.equal(sheets[0].length,206);
+ const headers=sheets[0][0],nameColumn=headers.indexOf('Comercial / solicitante');
+ assert.ok(sheets[0].slice(1).every(row=>row[nameColumn]==='María Comercial'));
+ assert.equal(new Set(selected.map(t=>t.requestType)).size,3);
+ assert.doesNotMatch(reports.render([{...ticket,scope:'external'}],[],{},{scope:'external'}),/id="manager-requester-filter"/);
+ const source=fs.readFileSync('docs/assets/production.js','utf8');
+ assert.match(source,/\['type','country','study','month','origin','status','analyst','requester'\]/);
+});

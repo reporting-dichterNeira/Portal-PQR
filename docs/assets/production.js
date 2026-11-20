@@ -37,7 +37,7 @@
   const attachmentBucket = 'pqr-adjuntos';
   const maxAttachmentBytes = 10 * 1024 * 1024;
   const attachmentTypes = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-  const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all' };
+  const managerState = { view: 'overview', auditDimension: '', country: 'all', study: 'all', month: 'all', origin: 'all', status: 'all', analyst: 'all', type: 'all', requester: 'all' };
   const listTypes = { comercial: 'all', validador: 'all', redigitador: 'all', admin: 'all', campo: 'all' };
   const analystFilters = { country: 'all', study: 'all', month: 'all', origin: 'all', type: 'all', status: 'all', analyst: 'all', requester: 'all' };
   const redigitatorFilters = { type: 'all', status: 'all', requester: 'all' };
@@ -447,7 +447,7 @@
     $('#view h1').textContent=`Dashboard · ${window.PQRScopes.label(workspace)}`;
     $('#view .manager-title .sub').textContent=workspace==='internal'?'Indicadores exclusivos de solicitudes internas, sin mezclar casos de clientes.':'Indicadores de clientes e históricos. No incluye solicitudes internas.';
     if (canCreateManualPqr()) $('.export-actions')?.insertAdjacentHTML('afterbegin', manualPqrButtons());
-    for(const key of ['type','country','study','month','origin','status','analyst'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
+    for(const key of ['type','country','study','month','origin','status','analyst','requester'])$('#manager-'+key+'-filter')?.addEventListener('change',event=>{managerState[key]=event.target.value;dashboard();});
   }
   function completeData(ticket) {
     const h=window.PQRHistory, old=state.overrides.find(o=>o.case_id===ticket.id);
