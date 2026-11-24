@@ -4,6 +4,7 @@ window.PQRScopes=(()=>{
   const select=(tickets,scope)=>tickets.filter(t=>of(t)===scope);
   const label=scope=>scope==='internal'?'PQR internas':'PQR de clientes';
   const eligible=role=>['validador','gerente','redigitador','admin','campo'].includes(role);
-  return{of,select,label,eligible};
+  const forRole=(scope,role)=>role==='campo'?'internal':scope;
+  return{of,select,label,eligible,forRole};
 })();
 

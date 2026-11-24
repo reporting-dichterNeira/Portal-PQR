@@ -64,7 +64,7 @@
   let auditLookup = window.PQRAudits?.empty();
   let auditLookupOwner = null;
   let workspace = ['#internas','#gestion'].includes(location.hash) ? 'internal' : 'external';
-  const scopeTickets = () => window.PQRScopes.select(state.tickets,workspace);
+  const scopeTickets = () => window.PQRScopes.select(state.tickets,window.PQRScopes.forRole(workspace,state.me?.role));
 
   const managerTickets = () => [...scopeTickets(),...(workspace==='external'?state.historical:[])].map(t=>{
     const result=window.PQRHistory.resolve(t,auditLookup,state.overrides.find(o=>o.case_id===t.id));
@@ -353,6 +353,8 @@
   }
   function renderApp() {
     const me = state.me;
+    workspace=window.PQRScopes.forRole(workspace,me.role);
+    if(me.role==='campo')history.replaceState(null,'','#gestion');
     $('#app').innerHTML = `<header class="app-header"><div class="brand"><img src="assets/dn-icon-blue.webp" alt=""><div><small>dichter &amp; neira</small>Portal PQR</div></div><nav class="nav" aria-label="Bandeja"><span class="active">${esc(roles[me.role])}</span></nav><div class="user"><span><strong>${esc(me.name)}</strong><br><small>@${esc(me.username)}</small></span><button class="ghost" data-action="notifications">Notificaciones${state.notifications.filter(item => !item.read).length ? ` (${state.notifications.filter(item => !item.read).length})` : ''}</button><button class="ghost" data-action="password">Contraseña</button><button class="ghost" data-action="logout">Salir</button></div></header><main class="layout" id="view"></main>`;
     $('#view').insertAdjacentHTML('beforebegin',window.PQRNavigation.workspaceNav(workspace,me.role));
     if(me.isUniversal)$('.user').insertAdjacentHTML('afterbegin','<button class="secondary" data-action="universal-menu">Cambiar perfil</button>');
@@ -360,6 +362,8 @@
   }
   function renderView() {
     const role = state.me.role;
+    workspace=window.PQRScopes.forRole(workspace,role);
+    if(role==='campo')history.replaceState(null,'','#gestion');
     document.title=`${window.PQRScopes.label(workspace)} · ${roles[role]}`;
     if(workspace==='internal'&&!window.PQRScopes.eligible(role)){
       $('#view').innerHTML='<section class="card"><h1>Este es el seguimiento del equipo</h1><p>Con una cuenta Comercial puedes gestionar tus PQR de clientes. Para enviar una solicitud interna no necesitas una cuenta ni entrar a esta bandeja.</p><div class="actions"><a class="primary module-link" href="#solicitud-interna">Enviar solicitud interna</a><a class="ghost module-link" href="#clientes">Ir a mis PQR de clientes</a><a href="#inicio">Volver al inicio</a></div></section>';return;
@@ -965,7 +969,7 @@
       if(type==='batch-dictate'&&state.me?.role==='validador')return analystBatchForm('dictate');
       if(type==='workspace'&&window.PQRScopes.eligible(state.me?.role)){
         analystSelection.clear();
-        workspace=button.dataset.scope==='internal'?'internal':'external';
+        workspace=window.PQRScopes.forRole(button.dataset.scope==='internal'?'internal':'external',state.me.role);
         history.replaceState(null,'',workspace==='internal'?'#gestion':'#clientes');
         analystSection='requests';for(const key of Object.keys(analystFilters))analystFilters[key]='all';
         for(const key of Object.keys(redigitatorFilters))redigitatorFilters[key]='all';

@@ -32,3 +32,21 @@ test('visual navigation uses responsive controls and visible keyboard focus',()=
  assert.match(css,/@media\(max-width:600px\)/);
  assert.match(css,/\.workspace-create span\{display:none\}/);
 });
+
+test('Campo only has internal navigation and cannot select client tickets',()=>{
+ const scopeContext=vm.createContext({window:{}});
+ vm.runInContext(fs.readFileSync('docs/assets/scopes.js','utf8'),scopeContext);
+ const scopes=scopeContext.window.PQRScopes;
+ for(const requested of ['internal','external']){
+  const html=nav.workspaceNav(requested,'campo');
+  assert.match(html,/PQR internas/);
+  assert.doesNotMatch(html,/PQR de clientes|data-action="workspace"|href=|Nueva interna/);
+  assert.equal(scopes.forRole(requested,'campo'),'internal');
+  const tickets=[{id:'client',scope:'external'},{id:'internal',scope:'internal'}];
+  assert.deepEqual(scopes.select(tickets,scopes.forRole(requested,'campo')).map(t=>t.id),['internal']);
+ }
+ assert.equal(scopes.forRole('external','validador'),'external');
+ assert.match(app,/PQRScopes.forRole\(workspace,me.role\)/);
+ assert.match(app,/PQRScopes.forRole\(workspace,role\)/);
+ assert.match(app,/PQRScopes.forRole\(workspace,state.me\?\.role\)/);
+});
