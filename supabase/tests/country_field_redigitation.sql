@@ -22,14 +22,23 @@ do $$ begin
 end $$;
 select public.pqr_action('field_complete',current_setting('pqr.test.gt')::uuid,'{"audit":"99999999191904","notes":"Redigitación completada en prueba"}');
 reset role;
-do $$ begin assert (select status='Pendiente de Verificación' and not(data?'closedAt') from public.pqr_tickets where id=current_setting('pqr.test.gt')::uuid),'Field must await PQR';end $$;
+do $$ begin assert (select status='Pendiente de aprobación de Validación' and not(data?'closedAt') from public.pqr_tickets where id=current_setting('pqr.test.gt')::uuid),'Field must await Validation';end $$;
 select set_config('request.jwt.claim.sub',(select id::text from public.pqr_profiles where role='validador' and active limit 1),true);
-select public.pqr_action('verify',current_setting('pqr.test.gt')::uuid,'{"ok":"no","comment":"Revisar el ajuste nuevamente"}');
+do $$ begin
+ begin perform public.pqr_action('verify',current_setting('pqr.test.gt')::uuid,'{"ok":"yes","comment":"Intento de saltar Validación"}');raise exception 'BYPASS ALLOWED';exception when others then if sqlerrm='BYPASS ALLOWED' then raise;end if;end;
+ begin perform public.pqr_action('field_review',current_setting('pqr.test.gt')::uuid,'{"ok":"yes","comment":"Analista no puede aprobar Validación"}');raise exception 'WRONG ROLE ALLOWED';exception when others then if sqlerrm='WRONG ROLE ALLOWED' then raise;end if;end;
+end $$;
+select set_config('request.jwt.claim.sub',(select id::text from public.pqr_profiles where role='redigitador' and active limit 1),true);
+select public.pqr_action('field_review',current_setting('pqr.test.gt')::uuid,'{"ok":"no","comment":"Revisar el ajuste nuevamente"}');
 select set_config('request.jwt.claim.sub',(select id::text from public.pqr_profiles where username='campogt'),true);
 select public.pqr_action('field_complete',current_setting('pqr.test.gt')::uuid,'{"audit":"99999999191905","notes":"Segunda corrección de prueba"}');
+select set_config('request.jwt.claim.sub',(select id::text from public.pqr_profiles where role='validador' and active limit 1),true);
+select set_config('request.jwt.claim.sub',(select id::text from public.pqr_profiles where role='redigitador' and active limit 1),true);
+select public.pqr_action('field_review',current_setting('pqr.test.gt')::uuid,'{"ok":"yes","comment":"Trabajo de Campo aprobado por Validación"}');
+do $$ begin assert (select status='Pendiente de Verificación' and data->>'fieldApprovedAudit'=data->>'audit' and not(data?'closedAt') from public.pqr_tickets where id=current_setting('pqr.test.gt')::uuid),'Validation approval must await analyst closure';end $$;
 select set_config('request.jwt.claim.sub',(select id::text from public.pqr_profiles where role='validador' and active limit 1),true);
 select public.pqr_action('verify',current_setting('pqr.test.gt')::uuid,'{"ok":"yes","comment":"Aprobado por Analistas de PQR"}');
 do $$ begin assert (select status='Cerrado' and data?'closedAt' from public.pqr_tickets where id=current_setting('pqr.test.gt')::uuid),'Only PQR closes';end $$;
 rollback;
-select 'Flujo Campo por país, aislamiento RLS, rechazo, reenvío y cierre final: OK' result;
+select 'Flujo Validación → Campo → Validación → Analistas: OK; aislamiento RLS y bloqueo de cierre anticipado' result;
 

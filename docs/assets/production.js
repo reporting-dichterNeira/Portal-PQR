@@ -398,6 +398,7 @@
       if (requestType(ticket) === 'PQR' && ['Cerrado', 'No Aplica'].includes(ticket.status)) result += `<button class="danger" data-action="reopen" data-id="${ticket.id}">Reabrir</button>`;
       return result;
     }
+    if(role==='redigitador'&&ticket.fieldAccountId&&ticket.status==='Pendiente de aprobación de Validación')return `<button class="primary" data-action="field-review" data-id="${esc(ticket.id)}">Revisar respuesta de Campo</button>`;
     if (role === 'campo') return ['Pendiente de Redigitación','Devuelto'].includes(ticket.status)?`<button class="primary" data-action="field-complete" data-id="${esc(ticket.id)}">Confirmar redigitación</button>`:'';
     if (role === 'redigitador' && (['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status) || (requestType(ticket) === 'EDC' && ticket.status === 'Pendiente de Verificación'))) return `${ticket.status !== 'Pendiente de Verificación' ? `<button class="secondary" data-action="assign-redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Asignar edición' : 'Asignar'}</button>` : ''}${!ticket.fieldAccountId && (ticket.redigitatorPersonId || ticket.fieldRedigitatorName) ? `<button class="primary" data-action="redigit" data-id="${ticket.id}">${requestType(ticket) === 'EDC' ? 'Confirmar edición' : 'Redigitar'}</button>` : ''}`;
     if (role === 'comercial' && ticket.status === 'Cerrado' && !ticket.feedback) return `<button class="secondary" data-action="feedback" data-id="${ticket.id}">Calificar</button>`;
@@ -424,10 +425,10 @@
   }
   function fieldQueue() {
     const cases=scopeTickets().filter(t=>t.fieldAccountId===state.me.id&&t.country===state.me.field_country);
-    $('#view').innerHTML=`${header('Campo · '+state.me.field_country,'Redigita las auditorías enviadas por Validación. Al confirmar, Analistas de PQR dará el aprobado final.')}<section class="metrics">${metric('Asignadas',cases.length)}${metric('Pendientes',cases.filter(t=>['Pendiente de Redigitación','Devuelto'].includes(t.status)).length)}${metric('En aprobación PQR',cases.filter(t=>t.status==='Pendiente de Verificación').length)}${metric('Cerradas',cases.filter(t=>t.status==='Cerrado').length)}</section>${ticketTable(cases,'campo')}`;
+    $('#view').innerHTML=`${header('Campo · '+state.me.field_country,'Redigita las auditorías enviadas por Validación. Al confirmar, Validación revisará el trabajo y después Analistas de PQR dará el cierre final.')}<section class="metrics">${metric('Asignadas',cases.length)}${metric('Pendientes',cases.filter(t=>['Pendiente de Redigitación','Devuelto'].includes(t.status)).length)}${metric('En revisión de Validación',cases.filter(t=>t.status==='Pendiente de aprobación de Validación').length)}${metric('En cierre PQR',cases.filter(t=>t.status==='Pendiente de Verificación').length)}${metric('Cerradas',cases.filter(t=>t.status==='Cerrado').length)}</section>${ticketTable(cases,'campo')}`;
   }
   function completeField(ticket) {
-    modal('Confirmar redigitación · '+ticket.code,`<p>El caso volverá a Analistas de PQR para aprobación final.</p><form id="action-form" class="stack"><label>Nueva auditoría<input name="audit" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric required maxlength="80"></label><label>Detalle de la redigitación<textarea name="notes" required minlength="5" maxlength="12000"></textarea></label><button class="primary">Enviar a aprobación PQR</button></form>`);
+    modal('Confirmar redigitación · '+ticket.code,`<p>El caso volverá a Validación para revisar y aprobar la redigitación. Después pasará a Analistas de PQR para el cierre final.</p><form id="action-form" class="stack"><label>Nueva auditoría<input name="audit" inputmode="numeric" pattern="[0-9]{1,80}" data-numeric required maxlength="80"></label><label>Detalle de la redigitación<textarea name="notes" required minlength="5" maxlength="12000"></textarea></label><button class="primary">Enviar a revisión de Validación</button></form>`);
     const form=$('#action-form');form.onsubmit=async event=>{event.preventDefault();await submit(form,()=>action('field_complete',ticket.id,formData(form)));};
   }
   function internalExportButton() {
@@ -439,7 +440,7 @@
   function redigitator() {
     const all = redigitatorTickets();
     const cases = workspace==='internal' ? PQRReports.filterTickets(all, redigitatorFilters) : all;
-    $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.', internalExportButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Por verificar', cases.filter(ticket => requestType(ticket) === 'PQR' && ticket.status === 'Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
+    $('#view').innerHTML = `${header('Bandeja de redigitación', 'Gestiona redigitaciones y ediciones. Las ediciones de Validación se cierran aquí.', internalExportButton())}<section class="metrics">${metric('Total', cases.length)}${metric('Pendientes', cases.filter(ticket => ['Pendiente de Redigitación', 'Devuelto'].includes(ticket.status)).length)}${metric('Respuestas de Campo por aprobar',cases.filter(ticket=>ticket.status==='Pendiente de aprobación de Validación').length)}${metric('En cierre PQR',cases.filter(ticket=>ticket.status==='Pendiente de Verificación').length)}${metric('Cerradas', cases.filter(ticket => ticket.status === 'Cerrado').length)}</section>${ticketTable(cases, 'redigitador')}`;
     if(workspace==='internal') {
       $('#view').querySelector('.metrics').insertAdjacentHTML('afterend',PQRReports.internalListFilters(all,redigitatorFilters));
       for(const key of Object.keys(redigitatorFilters)) $('#redigitator-'+key+'-filter')?.addEventListener('change',event=>{redigitatorFilters[key]=event.target.value;redigitator();});
@@ -861,6 +862,10 @@
     modal(`${edition ? 'Confirmar edición' : 'Redigitar'} · ${ticket.code}`, `<p class="sub">${esc(ticket.redigitType || 'Validación')} · ${esc(ticket.fieldRedigitatorName || staffName('redigitador', ticket.redigitatorPersonId))}</p><form id="action-form" class="stack">${edition ? '<label>¿Se editó la auditoría?<select name="edited" required><option value="">Selecciona una respuesta</option><option value="yes">Sí, se editó</option><option value="no">No se editó</option></select></label><label>Comentario para Comercial<textarea name="comment" minlength="5" required></textarea></label>' : '<label>Nuevo número de auditoría<input name="audit" inputmode="numeric" pattern="[0-9]+" data-numeric required></label><label>Notas del cambio<textarea name="notes" minlength="5" required></textarea></label>'}<div class="actions"><button class="primary">${edition ? 'Finalizar y avisar a Comercial' : 'Enviar a aprobación PQR'}</button></div></form>`);
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action(edition ? 'edit_complete' : 'redigit', ticket.id, formData(form))); };
   }
+  function reviewField(ticket) {
+    modal(`Revisar respuesta de Campo · ${ticket.code}`,`<div class="case-result"><p><strong>Nueva auditoría:</strong> ${esc(ticket.audit||'—')}</p><p>${esc(ticket.redigitNotes||'')}</p></div><form id="action-form" class="stack"><label>Resultado<select name="ok" required><option value="yes">Aprobar y enviar a Analistas de PQR</option><option value="no">Devolver a Campo para corrección</option></select></label><label>Comentario de Validación<textarea name="comment" required minlength="5" maxlength="12000"></textarea></label><button class="primary">Confirmar revisión</button></form>`);
+    const form=$('#action-form');form.onsubmit=async event=>{event.preventDefault();await submit(form,()=>action('field_review',ticket.id,formData(form)));};
+  }
   function verify(ticket) {
     modal(`Verificar · ${ticket.code}`, `<div class="case-result"><p><strong>Nueva auditoría:</strong> ${esc(ticket.audit || '—')}</p><p>${esc(ticket.redigitNotes || '')}</p></div><form id="action-form" class="stack"><label>Resultado<select name="ok"><option value="yes">Aprobar y cerrar</option><option value="no">Devolver a redigitación</option></select></label><label>Comentario<textarea name="comment" minlength="5" required></textarea></label><div class="actions"><button class="primary">Confirmar resultado</button></div></form>`);
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, () => action('verify', ticket.id, formData(form))); };
@@ -1000,6 +1005,7 @@
         return;
       }
       if(type==='analyst-section'&&state.me.role==='validador'){analystSection=button.dataset.section==='verification'?'verification':'requests';analystSelection.clear();for(const key of Object.keys(analystFilters))analystFilters[key]='all';return analyst();}
+      if(type==='field-review'&&state.me.role==='redigitador'&&ticket)return reviewField(ticket);
       if(type==='field-complete'&&state.me.role==='campo'&&ticket)return completeField(ticket);
       if (type === 'detail' && ticket) return detail(ticket);
       if (type === 'edit-manual-pqr' && ticket) return editManualPqr(ticket);
