@@ -39,8 +39,8 @@ test('rejects empty, duplicate, oversized, mixed-scope or incomplete common answ
 test('selection exists only for analysts, disables completed/other types and drops filtered-out rows',()=>{
  const app=fs.readFileSync('docs/assets/production.js','utf8'),selection=new Set(['hidden','one']);
  const escape=v=>String(v??'').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
- const c=vm.createContext({window:{PQRAnalystBatch:batch},analystSelection:selection,listTypes:{},esc:escape,fmt:()=>'',
-  requestLabels:{PQR:'PQR',RDG:'Redigitación'},requestType:t=>t.requestType||'PQR',badge:s=>s,staffName:()=>'',due:()=>'',ticketActions:()=>''});
+ const c=vm.createContext({window:{PQRAnalystBatch:batch},analystSelection:selection,workspace:"clients",listTypes:{},esc:escape,fmt:()=>'',
+  requestLabels:{PQR:'PQR',RDG:'Redigitación'},requestType:t=>t.requestType||'PQR',badge:s=>s,staffName:()=>'',due:()=>'',ticketActions:()=>'',priorityLabel:()=>''});
  vm.runInContext(app.slice(app.indexOf('  function ticketTable('),app.indexOf('  function ticketActions('))+
   app.slice(app.indexOf('  function analystBatchTools('),app.indexOf('  function updateAnalystSelection(')),c);
  c.cases=[first,{...second,status:'Cerrado'},{...second,id:'rdg',requestType:'RDG'}];

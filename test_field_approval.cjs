@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const app=fs.readFileSync('docs/assets/production.js','utf8');
-const c=vm.createContext({esc:String,canEditManualPqr:()=>false,requestType:t=>t.requestType||'RDG'});
+const c=vm.createContext({state:{me:{isUniversal:false}},esc:String,canEditManualPqr:()=>false,requestType:t=>t.requestType||'RDG'});
 vm.runInContext(app.slice(app.indexOf('  function ticketActions('),app.indexOf('  function analyst()')),c);
 const ticket={id:'test',fieldAccountId:'field',requestType:'RDG'};
 test('Field response is reviewed only by Validation and cannot be closed by analysts yet',()=>{
