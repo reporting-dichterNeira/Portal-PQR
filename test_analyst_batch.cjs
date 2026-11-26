@@ -71,3 +71,14 @@ test('audit can be omitted only when sending to redigitation, in either workspac
   assert.throws(()=>batch.prepare([ticket],'dictate',{...common,decision:'redigit'},{one:{auditOriginal:'ABC'}}),/auditoría/);
  }
 });
+
+test('batch reclassification is available on the selected analyst tickets and keeps optimistic versions',()=>{
+ const app=fs.readFileSync('docs/assets/production.js','utf8');
+ assert.match(app,/data-action="batch-reclassify"/);
+ assert.match(app,/\[data-action="batch-reclassify"\]/);
+ const code=app.slice(app.indexOf('  function reclassifyBatch('),app.indexOf(' function redigitBatch('));
+ assert.match(code,/pqr_reclassify_batch/);
+ assert.match(code,/expectedUpdatedAt:t.recordUpdatedAt/);
+ assert.match(code,/if\(batch\)analystSelection.clear\(\)/);
+ assert.match(code,/Cada radicado se conserva/);
+});

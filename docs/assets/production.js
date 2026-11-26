@@ -716,7 +716,7 @@
   function analystBatchTools(cases) {
     const eligible=cases.filter(window.PQRAnalystBatch.eligible),visibleIds=new Set(eligible.map(t=>t.id));
     for(const id of analystSelection)if(!visibleIds.has(id))analystSelection.delete(id);
-    return `<section class="card analyst-batch-toolbar" aria-label="Gestión múltiple de PQR"><div><strong id="analyst-selection-count" role="status">${analystSelection.size} PQR seleccionadas</strong><small>Marca las PQR que llevan la misma respuesta. Hasta 100 por operación; solo se seleccionan las visibles y pendientes de dictamen.</small></div><div class="actions"><button class="ghost" data-action="batch-clear">Limpiar selección</button><button class="secondary" data-action="batch-assign" ${analystSelection.size?'':'disabled'}>Asignar seleccionadas</button><button class="primary" data-action="batch-dictate" ${analystSelection.size?'':'disabled'}>Asignar y dictaminar</button></div></section>`;
+    return `<section class="card analyst-batch-toolbar" aria-label="Gestión múltiple de PQR"><div><strong id="analyst-selection-count" role="status">${analystSelection.size} PQR seleccionadas</strong><small>Marca las PQR que llevan la misma respuesta. Hasta 100 por operación; solo se seleccionan las visibles y pendientes de dictamen.</small></div><div class="actions"><button class="ghost" data-action="batch-clear">Limpiar selección</button><button class="secondary" data-action="batch-assign" ${analystSelection.size?'':'disabled'}>Asignar seleccionadas</button><button class="primary" data-action="batch-dictate" ${analystSelection.size?'':'disabled'}>Asignar y dictaminar</button><button class="secondary" data-action="batch-reclassify" ${analystSelection.size?'':'disabled'}>Reclasificar y enviar</button></div></section>`;
   }
   function updateAnalystSelection() {
     const boxes=Array.from(document.querySelectorAll('[data-batch-ticket]:not(:disabled)'));
@@ -724,7 +724,7 @@
     const count=$('#analyst-selection-count');if(count)count.textContent=`${analystSelection.size} PQR seleccionadas`;
     const all=$('#analyst-select-visible');
     if(all){const group=boxes.slice(0,window.PQRAnalystBatch.MAX);all.checked=group.length>0&&group.every(b=>b.checked);all.indeterminate=analystSelection.size>0&&!all.checked;}
-    document.querySelectorAll('[data-action="batch-assign"],[data-action="batch-dictate"]').forEach(b=>{b.disabled=!analystSelection.size;});
+    document.querySelectorAll('[data-action="batch-assign"],[data-action="batch-dictate"],[data-action="batch-reclassify"]').forEach(b=>{b.disabled=!analystSelection.size;});
   }
   function bindBatchSuggestions(form,tickets) {
     let suggestions=new Map(),loading=false,unmatchedOnly=false;
@@ -851,11 +851,16 @@
       return action('dictate', ticket.id, payload);
     }); };
   }
-  function reclassify(ticket){
+  function reclassifyBatch(){
+    const tickets=scopeTickets().filter(t=>analystSelection.has(t.id));
+    if(!tickets.length||tickets.length>100||tickets.some(t=>!window.PQRAnalystBatch.eligible(t)||!t.recordUpdatedAt))throw new Error('Selecciona entre 1 y 100 PQR pendientes y actualiza la bandeja.');
+    reclassify(null,tickets);
+  }
+  function reclassify(ticket,batch=null){
  const people=state.staff.redigitators.filter(p=>p.active);
- modal('Reclasificar y enviar · '+ticket.code,`<form id="reclassify-form" class="stack"><p>La clasificación original y el motivo del cambio quedarán en el historial. El radicado se conserva.</p><label>Nueva clasificación<select name="requestType"><option value="RDG">Redigitación</option><option value="EDC">Edición</option></select></label><label>Destino<select name="redigitType"><option>Validación</option><option>Campo</option></select></label><label data-reclass-person>Redigitador de Validación<select name="personId" required><option value="">Selecciona una persona</option>${people.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><p data-reclass-field hidden>Se enviará a la cuenta de Campo del país del ticket.</p><label>Motivo de la corrección<textarea name="reason" required minlength="5" maxlength="12000"></textarea></label><button class="primary">Confirmar clasificación y enviar</button></form>`);
+ modal('Reclasificar y enviar · '+(batch?batch.length+' PQR':ticket.code),`<form id="reclassify-form" class="stack"><p>${batch?`Se aplicará a las ${batch.length} PQR seleccionadas. `:''}La clasificación original y el motivo del cambio quedarán en el historial. Cada radicado se conserva.</p><label>Nueva clasificación<select name="requestType"><option value="RDG">Redigitación</option><option value="EDC">Edición</option></select></label><label>Destino<select name="redigitType"><option>Validación</option><option>Campo</option></select></label><label data-reclass-person>Redigitador de Validación<select name="personId" required><option value="">Selecciona una persona</option>${people.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><p data-reclass-field hidden>Se enviará a la cuenta de Campo del país del ticket.</p><label>Motivo de la corrección<textarea name="reason" required minlength="5" maxlength="12000"></textarea></label><button class="primary">Confirmar clasificación y enviar</button></form>`);
  const form=$('#reclassify-form');const sync=()=>{const edition=form.elements.requestType.value==='EDC';if(edition)form.elements.redigitType.value='Validación';form.elements.redigitType.disabled=edition;const field=form.elements.redigitType.value==='Campo';form.querySelector('[data-reclass-person]').hidden=field;form.querySelector('[data-reclass-field]').hidden=!field;form.elements.personId.required=!field;};form.elements.requestType.onchange=sync;form.elements.redigitType.onchange=sync;sync();
- form.onsubmit=async e=>{e.preventDefault();await submit(form,async()=>{const payload={...formData(form),redigitType:form.elements.redigitType.value};const {error}=await db.rpc('pqr_reclassify',{p_ticket:ticket.id,p_data:payload});if(error)throw error;});};
+ form.onsubmit=async e=>{e.preventDefault();await submit(form,async()=>{const payload={...formData(form),redigitType:form.elements.redigitType.value};const {error}=await db.rpc(batch?'pqr_reclassify_batch':'pqr_reclassify',batch?{p_items:batch.map(t=>({id:t.id,expectedUpdatedAt:t.recordUpdatedAt})),p_data:payload}:{p_ticket:ticket.id,p_data:payload});if(error)throw error;if(batch)analystSelection.clear();});};
  }
  function redigitBatch(){
  const all=redigitatorTickets(),filtered=workspace==='internal'?PQRReports.filterTickets(all,redigitatorFilters):all;
@@ -987,7 +992,8 @@
     const type = button.dataset.action; const ticket = [...state.tickets, ...state.deleted].find(item => item.id === button.dataset.id);
     const reportTicket = state.me?.role==='gerente'?managerTickets().find(item=>item.id===button.dataset.id):null;
     try {
-      if(analystBatchBusy&&['close','batch-assign','batch-dictate','batch-clear','workspace','logout','universal-menu','universal-profile'].includes(type))return;
+      if(analystBatchBusy&&['close','batch-assign','batch-dictate','batch-reclassify','batch-clear','workspace','logout','universal-menu','universal-profile'].includes(type))return;
+      if(type==='batch-reclassify'&&state.me?.role==='validador')return reclassifyBatch();
       if(type==='reclassify'&&ticket)return reclassify(ticket);
       if(type==='redigit-batch'&&state.me?.role==='redigitador')return redigitBatch();
       if (type === 'close') return closeModal();
