@@ -6,3 +6,11 @@ const header=['ID_PDV','Detalle ','Prioridad (1-0)','ID_Auditoria'];
 test('carga la plantilla para los tres trámites y conserva cero y auditoría',()=>{const a=api(),r=a.excelRows(workbook([header,['00123','Revisar exhibidor',1,'0987'],['998','Revisar fotografía',0,'999']]));assert.equal(r.length,2);assert.equal(r[0].pdv,'00123');assert.equal(r[0].auditOriginal,'0987');assert.equal(r[1].priority,'0');for(const kind of ['PQR','RDG','EDC'])assert.equal(a.validate(r,kind).length,2);});
 test('rechaza prioridad distinta de cero o uno y auditoría inválida',()=>{const a=api();assert.throws(()=>a.excelRows(workbook([header,['1','Detalle suficiente',2,'12']])),/prioridad/);assert.throws(()=>a.excelRows(workbook([header,['1','Detalle suficiente',0,'ABC']])),/auditoría/);const r=a.excelRows(workbook([header,['1','Detalle suficiente',0,'']]));assert.equal(a.validate(r,'PQR').length,1);assert.throws(()=>a.validate(r,'RDG'),/auditoría/);});
 test('la plantilla oficial tiene los encabezados esperados',()=>{const w=XLSX.read(fs.readFileSync('docs/assets/plantilla_ticketera_interna.xlsx'),{type:'buffer'});const h=XLSX.utils.sheet_to_json(w.Sheets[w.SheetNames[0]],{header:1,raw:false})[0];assert.deepEqual(h,header);});
+
+test('Excel acepta 1000 filas para PQR, redigitación y edición y rechaza 1001',()=>{
+ const a=api(),rows=Array.from({length:1000},(_,i)=>[String(i+1).padStart(8,'0'),'Detalle del caso '+i,i%2,String(9000000+i)]);
+ const imported=a.excelRows(workbook([header,...rows]));
+ assert.equal(imported.length,1000);assert.equal(imported[999].pdv,'00001000');
+ for(const kind of ['PQR','RDG','EDC'])assert.equal(a.validate(imported,kind).length,1000);
+ assert.throws(()=>a.excelRows(workbook([header,...rows,['999999','Detalle adicional',0,'888888']])),/1000/);
+});
