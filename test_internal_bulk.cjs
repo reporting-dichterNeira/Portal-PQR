@@ -18,10 +18,10 @@ test('columnas independientes de ID o detalles se alinean desde la celda elegida
  assert.equal(rows[1].pdv,'002');assert.equal(rows[1].description,'Detalle cambiado');assert.equal(rows[2].description,'Detalle de tres');
  assert.throws(()=>a.paste(rows,'uno\tdos',0,'description'),/primera columna/);
 });
-test('tres tipos generan filas individuales, sin sustituir los requisitos de auditoría',()=>{
+test('tres tipos aceptan auditoría vacía al radicar y rechazan IDs inválidos',()=>{
  const a=api(),rows=a.paste([],'123\tDetalle de la solicitud\t987');
  rows[0].priority='1'; for(const kind of ['PQR','RDG','EDC'])assert.equal(a.validate(rows,kind)[0].auditOriginal,'987');
- for(const kind of ['RDG','EDC'])assert.throws(()=>a.validate([{pdv:'123',description:'Detalle válido'}],kind),/auditoría/);
+ for(const kind of ['PQR','RDG','EDC']) { assert.equal(a.validate([{pdv:'123',description:'Detalle válido',priority:'0'}],kind)[0].auditOriginal,''); assert.throws(()=>a.validate([{pdv:'123',description:'Detalle válido',priority:'0',auditOriginal:'abc'}],kind),/auditoría/); }
  assert.throws(()=>a.validate([{pdv:'123',description:'corto',priority:'1'}],'PQR'),/detalle/);
  assert.throws(()=>a.validate([{pdv:'1e12',description:'Detalle válido'}],'PQR'),/notación científica/);
  assert.throws(()=>a.validate([rows[0],rows[0]],'PQR'),/repetidos/);
