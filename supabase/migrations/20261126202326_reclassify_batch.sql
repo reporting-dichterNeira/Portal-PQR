@@ -17,15 +17,15 @@ begin
  if coalesce(p_data->>'requestType','') not in ('RDG','EDC') or coalesce(p_data->>'redigitType','') not in ('Validación','Campo') or length(btrim(coalesce(p_data->>'reason',''))) not between 5 and 12000 or (p_data->>'requestType'='EDC' and p_data->>'redigitType'<>'Validación') then raise exception 'Completa clasificación, destino y motivo'; end if;
  n:=jsonb_array_length(p_items);
  if n not between 1 and 100 or (select count(distinct x->>'id') from jsonb_array_elements(p_items)x)<>n or exists(select 1 from jsonb_array_elements(p_items)x where jsonb_typeof(x) is distinct from 'object' or nullif(x->>'expectedUpdatedAt','') is null) then raise exception 'Selecciona entre 1 y 100 casos distintos'; end if;
- for t in select t.* from public.pqr_tickets t join jsonb_array_elements(p_items)x on t.id=(x->>'id')::uuid order by t.id for update of t loop
+ for t in select q.* from public.pqr_tickets q join jsonb_array_elements(p_items)x on q.id=(x->>'id')::uuid order by q.id for update of q loop
   seen:=seen+1;
   select x into item from jsonb_array_elements(p_items)x where (x->>'id')::uuid=t.id;
-  if t.deleted_at is not null or t.status in ('Cerrado','No Aplica') then raise exception '% ya no permite reclasificación',t.code; end if;
+  if t.deleted_at is not null or t.status not in ('Radicado','En Validación','Reabierto') or coalesce(t.data->>'requestType','PQR')<>'PQR' then raise exception '% ya no permite reclasificación',t.code; end if;
   if t.updated_at is distinct from (item->>'expectedUpdatedAt')::timestamptz then raise exception '% cambió. Actualiza la bandeja y revisa la selección',t.code; end if;
   if scope is null then scope:=coalesce(t.data->>'scope','external'); elsif scope<>coalesce(t.data->>'scope','external') then raise exception 'No mezcles bandejas'; end if;
  end loop;
  if seen<>n then raise exception 'Alguno de los casos ya no está disponible'; end if;
- for t in select t.* from public.pqr_tickets t join jsonb_array_elements(p_items)x on t.id=(x->>'id')::uuid order by t.id loop
+ for t in select q.* from public.pqr_tickets q join jsonb_array_elements(p_items)x on q.id=(x->>'id')::uuid order by q.id loop
   result:=public.pqr_reclassify(t.id,p_data);
  end loop;
  return jsonb_build_object('count',n,'requestType',p_data->>'requestType','destination',p_data->>'redigitType');
