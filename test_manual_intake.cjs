@@ -4,7 +4,7 @@ const dictate=source.slice(source.indexOf('  function dictate('),source.indexOf(
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function formFor(ticket,payload){
  const calls=[],dialogs=[];
- const form={elements:{area:{value:''},tipology:{value:''},areaOther:{value:''}}};
+ const form={elements:{decision:{value:payload.decision,addEventListener(_event,fn){this.change=fn;}},auditOriginal:{required:true},area:{value:''},tipology:{value:''},areaOther:{value:''}}};
  const ctx=vm.createContext({state:{tips:['Insumos'],tipAreas:{Insumos:'Comercial'}},combinedArea:'OPS Campo/Validación',standardAreas:['Comercial','IT'],esc,
   staffName:()=> 'Analista',options:values=>values.map(v=>`<option>${esc(v)}</option>`).join(''),
   modal:(title,html)=>dialogs.push({title,html}),$:selector=>selector==='#action-form'?form:{classList:{toggle(){}},textContent:''},
@@ -66,4 +66,14 @@ test('migración conserva autorización, núcleo no público y aplicación atóm
  assert.match(sql,/array_length\(string_to_array\(definition,anchor\),1\)<>2/);
  assert.match(sql,/revoke all on function public.pqr_action_legacy\(text,uuid,jsonb\) from public, anon, authenticated/);
  assert.doesNotMatch(sql,/alter policy|alter table|create policy/i);
+});
+
+
+test('auditoría original es opcional solo al remitir y vuelve a ser obligatoria al cerrar',()=>{
+ const p=formFor(ticket,{...base,decision:'redigit'});
+ assert.equal(p.form.elements.auditOriginal.required,false);
+ p.form.elements.decision.value='yes';p.form.elements.decision.change();
+ assert.equal(p.form.elements.auditOriginal.required,true);
+ p.form.elements.decision.value='no';p.form.elements.decision.change();
+ assert.equal(p.form.elements.auditOriginal.required,true);
 });

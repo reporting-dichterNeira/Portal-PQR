@@ -62,3 +62,12 @@ test('select-visible reflects its capped group so one more click can deselect it
  selection.clear();vm.runInContext('updateAnalystSelection()',c);assert.equal(all.checked,false);assert.equal(all.indeterminate,false);
  selection.add('one');vm.runInContext('updateAnalystSelection()',c);assert.equal(all.checked,false);assert.equal(all.indeterminate,true);
 });
+
+test('audit can be omitted only when sending to redigitation, in either workspace',()=>{
+ for(const scope of ['internal','external']){
+  const ticket={...first,scope,auditOriginal:''};
+  assert.equal(batch.prepare([ticket],'dictate',{...common,decision:'redigit'}).p_items[0].auditOriginal,'');
+  for(const decision of ['yes','no'])assert.throws(()=>batch.prepare([ticket],'dictate',{...common,decision}),/auditoría/);
+  assert.throws(()=>batch.prepare([ticket],'dictate',{...common,decision:'redigit'},{one:{auditOriginal:'ABC'}}),/auditoría/);
+ }
+});

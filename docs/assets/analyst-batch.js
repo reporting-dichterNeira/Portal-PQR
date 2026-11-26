@@ -24,7 +24,7 @@
       if(operation==='dictate'){
         const e=edits[t.id]||{};
         item.auditOriginal=String(e.auditOriginal??t.auditOriginal??'').trim();
-        if(!/^\d{1,80}$/.test(item.auditOriginal))throw Error(`${t.code}: completa su ID de auditoría usando solo números.`);
+        if((!item.auditOriginal&&common.decision!=='redigit')||(item.auditOriginal&&!/^\d{1,80}$/.test(item.auditOriginal)))throw Error(`${t.code}: completa su ID de auditoría usando solo números.`);
         if(t.manualEntry){
           item.pdv=String(e.pdv??t.pdv??'').trim();item.description=String(e.description??t.description??'').trim();
           if(!/^\d{1,80}$/.test(item.pdv)||item.description.length<8||item.description.length>12000)throw Error(`${t.code}: completa su PDV y la descripción de la radicación.`);
