@@ -959,14 +959,15 @@
     const form = $('#action-form'); form.onsubmit = async event => { event.preventDefault(); await submit(form, async () => { const { error } = await db.auth.updateUser({ password: formData(form).password }); if (error) throw error; }); };
   }
   document.addEventListener('change',event=>{
-    const prefix=event.target?.dataset?.statusFilter;
+    const prefix=event.target?.dataset?.reportFilter;
     const expected={analyst:'validador',redigitator:'redigitador',manager:'gerente'};
-    if(!prefix||workspace!=='internal'||state.me?.role!==expected[prefix])return;
+    const key=event.target?.dataset?.filterKey;
+    if(!prefix||!key||state.me?.role!==expected[prefix])return;
     event.stopPropagation();
     const filters=prefix==='analyst'?analystFilters:prefix==='redigitator'?redigitatorFilters:managerState;
-    filters.status=PQRReports.toggleStatus(filters.status,event.target.value,event.target.checked);
+    filters[key]=PQRReports.toggleStatus(filters[key],event.target.value,event.target.checked);
     renderView();
-    const control=$('#'+prefix+'-status-filter');if(control)control.open=true;
+    const control=$('#'+prefix+'-'+key+'-filter');if(control){control.open=true;control.querySelectorAll('input').forEach(box=>{if(box.value===event.target.value)box.focus({preventScroll:true});});}
   },true);
   document.addEventListener('click',event=>{
     document.querySelectorAll('details.status-multiselect[open]').forEach(control=>{if(!control.contains(event.target))control.open=false;});
@@ -1057,7 +1058,7 @@
       }
       if (state.me.role === 'gerente' && type === 'export-audit-table') {
         const cases=PQRReports.filterTickets(managerTickets(),managerState);
-        const analystLabel=$('#manager-analyst-filter')?.selectedOptions[0]?.textContent;
+        const analystLabel=PQRReports.filterLabel(PQRReports.statusValues(managerState.analyst).map(id=>state.staff.validators.find(p=>p.id===id)?.name||id));
         const count=window.PQRAudits.exportTable(cases,auditLookup,button.dataset.auditDimension,{...managerState,analystLabel});
         $('.audit-export-status').textContent=`Archivo Excel generado con ${count} registros de la categoría y los filtros actuales.`;
         return;

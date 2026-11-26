@@ -79,11 +79,11 @@ window.PQRAudits = (() => {
     if(!rows.length)throw new Error('No hay datos de esta categoría para los filtros seleccionados.');
     const XLSX=window.XLSX;
     if(!XLSX)throw new Error('No está disponible el generador de Excel.');
-    const filterValue=value=>!value||value==='all'?'Todos':value;
+    const filterValue=value=>Array.isArray(value)?value.join(', '):!value||value==='all'?'Todos':value;
     const content=[
       [d.title],['Generado',new Date().toLocaleString('es-CO')],
       ['País',filterValue(filters.country)],['Estudio',filterValue(filters.study)],['Mes de auditoría',filterValue(filters.month)],
-      ['Origen',filters.origin==='historical'?'Histórico (Excel)':filters.origin==='platform'?'Plataforma':'Todos'],
+      ['Origen',filterValue(Array.isArray(filters.origin)?filters.origin.map(v=>v==='historical'?'Histórico (Excel)':'Plataforma'):filters.origin==='historical'?'Histórico (Excel)':filters.origin==='platform'?'Plataforma':'Todos')],
       ['Tipo de solicitud',filterValue(filters.type)],['Estado',filters.status==='En Validación'?'En revisión':filterValue(filters.status)],
       ['Analista de PQR',filterValue(filters.analystLabel||filters.analyst)],
       ['Alcance','Solo PQR por auditoría original. Incluye todos los registros de la categoría, no solo el top 10.'],

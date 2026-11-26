@@ -85,6 +85,22 @@ test('unchecking and selecting all statuses clears restrictions without losing o
  assert.equal(reports.filterTickets([ticket,{...ticket,country:'Honduras'}],{status:'all',country:'Guatemala'}).length,1);
 });
 
+test('multiple choices in every filter combine by union within a field and intersection across fields',()=>{
+ const {reports,sheets}=setup();
+ const data=[{...ticket,id:'one',country:'Guatemala',client:'KO tradicional',status:'Radicado',requesterName:'Ana'},
+ {...ticket,id:'two',country:'Honduras',client:'Lindley',status:'Cerrado',requesterName:'Bea'},
+ {...ticket,id:'three',country:'Chile',client:'Lindley',status:'Cerrado',requesterName:'Ana'},
+ {...ticket,id:'four',country:'Honduras',client:'KO moderno',status:'Radicado',requesterName:'Bea'}];
+ const filters={country:['Guatemala','Honduras'],study:['KO tradicional','Lindley'],status:['Radicado','Cerrado'],requester:['Ana','Bea']};
+ const selected=reports.filterTickets(data,filters);assert.deepEqual(selected.map(t=>t.id),['one','two']);
+ reports.excelCases(selected);assert.equal(sheets[0].length,3);
+ const html=reports.listFilters(data,{},filters,{scope:'internal'});
+ for(const key of ['country','study','month','origin','type','status','analyst','requester'])assert.match(html,new RegExp(`data-filter-key="${key}"`));
+ assert.match(html,/value="Guatemala" checked/);assert.match(html,/value="Honduras" checked/);
+ assert.equal(reports.filterLabel(filters.country),'Guatemala, Honduras');
+ assert.equal(reports.filterTickets(data,{...filters,country:'all'}).length,3);
+});
+
 test('management requester filter includes every request type and exports the full matching dataset',()=>{
  const {reports,sheets}=setup();
  const tickets=Array.from({length:205},(_,i)=>({...ticket,id:String(i),pdv:String(1000+i),requestType:['PQR','RDG','EDC'][i%3]}));
@@ -92,7 +108,7 @@ test('management requester filter includes every request type and exports the fu
  for(const view of ['overview','details','pending']){
   const html=reports.render(tickets,[],{},{scope:'internal',view,requester:'María Comercial'});
   assert.match(html,/id="manager-requester-filter"/);
-  assert.match(html,/value="María Comercial" selected/);
+  assert.match(html,/value="María Comercial" checked/);
   assert.match(html,/205 de 206 solicitudes/);
  }
  const selected=reports.filterTickets(tickets,{requester:'María Comercial'});
